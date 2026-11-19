@@ -1,0 +1,205 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+
+# Выгрузка «Квартиры_2026-11-18_1000.xlsx» без строки заголовков.
+# Индексы — позиции колонок A–AL. Описание и скриншот не читаем: они не
+# входят в модель и сильно замедляют разбор файла.
+NEEDED_COLUMNS = {
+    0: "id",
+    8: "Общая площадь, кв.м",
+    10: "Количество комнат",
+    11: "Этаж",
+    12: "Этажность",
+    13: "Тип этажа",
+    15: "Балкон/лоджия",
+    16: "Санузел",
+    17: "Состояние отделки",
+    18: "Материал стен",
+    19: "Год постройки",
+    22: "Адрес",
+    28: "Цена",
+    34: "Зона",
+    35: "Расстояние до центра, м.",
+    36: "Ближайшая остановка, м.",
+    37: "Ближайшее метро, м.",
+}
+
+REPAIR_MAP = {
+    "Требует ремонта": 1,
+    "Под чистовую": 2,
+    "Типовой ремонт": 3,
+    "Комфортный ремонт": 4,
+    "Неизвестно": 3,
+}
+
+FLOOR_TYPE_MAP = {
+    "Первый": 1,
+    "Средний": 2,
+    "Последний": 3,
+    "Неизвестно": 2,
+}
+
+MATERIAL_MAP = {
+    "Кирпичный": 4,
+    "Монолитный": 5,
+    "Панельный": 2,
+    "Блочный": 3,
+    "Смешанный": 3,
+    "Деревянный": 1,
+    "Неизвестно": 3,
+}
+
+ZONE_MAP = {
+    "Исторический центр города": 5,
+    "Центр деловой активности": 4,
+    "Многоквартирная жилая застройка": 3,
+    "Зона автомагистралей": 2,
+    "Окраина": 1,
+    "Промзона": 1,
+    "ИЖС": 2,
+    "Зеленая зона": 3,
+    "Неизвестно": 3,
+}
+
+NUMERIC_FEATURES = [
+    "Общая площадь, кв.м",
+    "Количество комнат",
+    "Этаж",
+    "Этажность",
+    "Расстояние до центра, м.",
+    "Ближайшая остановка, м.",
+    "Ближайшее метро, м.",
+    "Год постройки",
+]
+
+
+def load_and_clean_data(path: str) -> pd.DataFrame:
+    """Загружает и очищает датасет."""
+    usecols = list(NEEDED_COLUMNS)
+    raw = pd.read_excel(path, header=None, usecols=usecols)
+    raw = raw.dropna(how="all")
+    if raw.shape[1] != len(usecols):
+        raise ValueError(f"Прочитано {raw.shape[1]} колонок, ожидалось {len(usecols)}")
+    df = raw.copy()
+    df.columns = [NEEDED_COLUMNS[i] for i in usecols]
+
+    df = df.dropna(subset=["Цена"])
+    df["Цена"] = pd.to_numeric(df["Цена"], errors="coerce")
+    df = df.dropna(subset=["Цена"])
+    df = df[df["Цена"] > 0]
+
+    q_low, q_high = df["Цена"].quantile([0.01, 0.99])
+    df = df[(df["Цена"] >= q_low) & (df["Цена"] <= q_high)]
+
+    df["Количество комнат"] = df["Количество комнат"].replace("4 и более", 4)
+    df["Количество комнат"] = df["Количество комнат"].replace("Студия", 0)
+    df["Количество комнат"] = pd.to_numeric(df["Количество комнат"], errors="coerce").fillna(1)
+
+    for col in NUMERIC_FEATURES:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    for col in ["Расстояние до центра, м.", "Ближайшая остановка, м.", "Ближайшее метро, м."]:
+        if col in df.columns:
+            positive = df.loc[df[col] > 0, col]
+            median_val = float(positive.median()) if len(positive) else 0.0
+            df[col] = df[col].where(df[col] > 0, median_val)
+
+    df["Общая площадь, кв.м"] = df["Общая площадь, кв.м"].fillna(df["Общая площадь, кв.м"].median())
+    df["Этаж"] = df["Этаж"].fillna(df["Этаж"].median())
+    df["Этажность"] = df["Этажность"].fillna(df["Этажность"].median())
+    df["Год постройки"] = df["Год постройки"].fillna(df["Год постройки"].median())
+
+    # Подписи оставляем для таблицы аналогов — в модель уходят коды.
+    df["Ремонт (текст)"] = df["Состояние отделки"].fillna("Типовой ремонт")
+    df["Материал (текст)"] = df["Материал стен"].fillna("Неизвестно")
+
+    df["Тип этажа"] = df["Тип этажа"].fillna("Средний").map(FLOOR_TYPE_MAP).fillna(2)
+    df["Состояние отделки"] = df["Состояние отделки"].fillna("Типовой ремонт").map(REPAIR_MAP).fillna(3)
+    df["Материал стен"] = df["Материал стен"].fillna("Неизвестно").map(MATERIAL_MAP).fillna(3)
+    df["Зона"] = df["Зона"].fillna("Неизвестно").map(ZONE_MAP).fillna(3)
+
+    df["Есть балкон"] = (df["Балкон/лоджия"].astype(str).str.strip() == "Есть").astype(int)
+    bathroom = df["Санузел"].astype(str).str.strip()
+    df["Раздельный санузел"] = bathroom.isin(["Раздельный"]).astype(int)
+
+    return df.reset_index(drop=True)
+
+
+def prepare_features(df: pd.DataFrame):
+    """Подготавливает матрицу признаков."""
+    feature_cols = [
+        "Общая площадь, кв.м",
+        "Количество комнат",
+        "Этаж",
+        "Этажность",
+        "Тип этажа",
+        "Состояние отделки",
+        "Материал стен",
+        "Есть балкон",
+        "Раздельный санузел",
+        "Расстояние до центра, м.",
+        "Ближайшая остановка, м.",
+        "Ближайшее метро, м.",
+        "Год постройки",
+        "Зона",
+    ]
+
+    X = df[feature_cols].copy()
+    y = df["Цена"].values.astype(float)
+    y_log = np.log(y)
+
+    log_cols = [
+        "Общая площадь, кв.м",
+        "Расстояние до центра, м.",
+        "Ближайшая остановка, м.",
+        "Ближайшее метро, м.",
+        "Год постройки",
+    ]
+    for col in log_cols:
+        X[col] = np.log1p(X[col].clip(lower=0))
+
+    return X, y, y_log, feature_cols
+
+
+class DataProcessor:
+    def __init__(self, data_path: str):
+        self.df = load_and_clean_data(data_path)
+        self.X, self.y, self.y_log, self.feature_cols = prepare_features(self.df)
+
+        self.scaler = StandardScaler()
+        self.X_scaled = self.scaler.fit_transform(self.X.to_numpy())
+
+    def get_stats(self):
+        return {
+            "n_objects": len(self.df),
+            "price_min": int(self.y.min()),
+            "price_max": int(self.y.max()),
+            "price_median": int(np.median(self.y)),
+            "area_median": float(self.df["Общая площадь, кв.м"].median()),
+        }
+
+    def get_analogues(self, indices: list, weights: list, top_n: int = 5):
+        """Возвращает топ-N аналогов с весами."""
+        sorted_pairs = sorted(zip(indices, weights), key=lambda x: -x[1])[:top_n]
+        max_weight = max(weights) if len(weights) else 0.001
+        analogues = []
+        for idx, w in sorted_pairs:
+            row = self.df.iloc[int(idx)]
+            analogues.append(
+                {
+                    "id": row.get("id", idx),
+                    "address": row.get("Адрес", "—") or "—",
+                    "area": round(float(row["Общая площадь, кв.м"]), 1),
+                    "rooms": int(row["Количество комнат"]),
+                    "floor": f"{int(row['Этаж'])}/{int(row['Этажность'])}",
+                    "material": row.get("Материал (текст)", "—"),
+                    "year": int(row["Год постройки"]),
+                    "repair": row.get("Ремонт (текст)", "—"),
+                    "price": int(row["Цена"]),
+                    "weight": float(w),
+                    "similarity": min(100, int(w * 100 / max(0.001, max_weight))),
+                }
+            )
+        return analogues
