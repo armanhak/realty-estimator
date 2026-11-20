@@ -12,7 +12,7 @@ from data_processor import (
     DataProcessor,
 )
 from house_info_service import HouseInfoService
-from model import ValuationModel
+from model import MIN_ANALOGUES, ValuationModel
 
 st.set_page_config(
     page_title="Оценка недвижимости — Нижний Новгород",
@@ -190,6 +190,7 @@ DEFAULTS = {
     "zone": "Многоквартирная жилая застройка",
     "balcony": "Есть",
     "bathroom": "Раздельный",
+    "sample_size": 40,
     "house": None,
     "house_message": "",
     "result": None,
@@ -312,11 +313,17 @@ def estimate_from_form() -> None:
         "year": int(st.session_state.year),
         "zone": ZONE_MAP.get(st.session_state.zone, 3),
     }
+    sample_size = int(st.session_state.sample_size)
+    n_objects = int(stats["n_objects"])
+    if sample_size < MIN_ANALOGUES or sample_size > n_objects:
+        st.error(f"Число аналогов — от {MIN_ANALOGUES} до {n_objects}.")
+        return
     house = st.session_state.house or {}
     st.session_state.result = model.estimate(
         features,
         latitude=house.get("latitude"),
         longitude=house.get("longitude"),
+        sample_size=sample_size,
     )
 
 
@@ -409,6 +416,18 @@ with st.form("valuation"):
         st.selectbox("Зона", list(ZONE_MAP), key="zone")
         st.selectbox("Балкон или лоджия", ["Есть", "Нет"], key="balcony")
         st.selectbox("Санузел", ["Раздельный", "Совмещённый"], key="bathroom")
+    st.number_input(
+        "Число аналогов в расчёте",
+        min_value=MIN_ANALOGUES,
+        max_value=int(stats["n_objects"]),
+        step=1,
+        key="sample_size",
+        help="Берутся квартиры с наибольшим весом. Коэффициенты, удельная цена и диапазон считаются только по ним.",
+    )
+    st.caption(
+        f"Например 40, 100 или 200. В базе {stats['n_objects']} квартир, "
+        "в формулу входят только выбранные — самые близкие по характеристикам и по карте."
+    )
     submitted = st.form_submit_button("Рассчитать рыночную стоимость", type="primary")
 
 if submitted:
@@ -516,10 +535,11 @@ if result:
     )
     st.markdown("**Ближайшие аналоги из базы**")
     st.markdown(
-        f"В цену входят все квартиры с весом не ниже 0,05. Если таких меньше 40, берутся 40 самых весомых: "
-        f"сейчас в расчёте {result['n_analogues_used']}. Коэффициенты и цена считаются по всей этой выборке. "
-        "В таблице только 5 квартир с наибольшим весом — ближайшие ориентиры. Отдельно в формулу они не подставляются, "
-        "их цены уже учтены в общем расчёте. Сходство — вес относительно самого весомого из этих пяти. "
+        f"В расчёт входят {result['n_analogues_used']} квартир с наибольшим весом — "
+        "столько, сколько задано в поле «Число аналогов в расчёте». "
+        "Коэффициенты, удельная цена, поправки и диапазон считаются только по ним. "
+        "В таблице 5 квартир с наибольшим весом из этой выборки: это ориентиры, отдельно в формулу они не подставляются. "
+        "Сходство — вес относительно самого весомого из этих пяти. "
         + distance_note
     )
     analogue_rows = []
@@ -588,7 +608,7 @@ $$
 w^{\text{карта}}_i = \exp\left(-\frac{m_i^2}{2 \cdot 1500^2}\right), \qquad w_i = w^{\text{хар}}_i \cdot w^{\text{карта}}_i
 $$
 
-1500 — ширина ядра в метрах, а не весь знаменатель. Знаменатель равен $2 \times 1500^2$. На расстоянии 1500 м вес близости около 61%, на 3 км — около 14%. Ближний дом остаётся важным, дальний почти выпадает. Квартиры с итоговым весом ниже 0,05 отбрасываются. Если после этого остаётся меньше 40, берутся 40 с наибольшим весом. По всей этой выборке считаются коэффициенты и цена.
+1500 — ширина ядра в метрах, а не весь знаменатель. Знаменатель равен $2 \times 1500^2$. На расстоянии 1500 м вес близости около 61%, на 3 км — около 14%. Ближний дом остаётся важным, дальний почти выпадает. Дальше остаются квартиры с наибольшим итоговым весом. Сколько их — задаётся в поле «Число аналогов в расчёте», например 40, 100 или 200. Коэффициенты, удельная цена и диапазон считаются только по этим квартирам.
 
 4. **Формула по отобранным квартирам.** Для аналога $i$ берутся его цена $P_i$ и площадь $S_i$. Ищутся $\alpha$ и коэффициенты $\beta_1, \ldots, \beta_{14}$, которые лучше всего объясняют удельные цены:
 

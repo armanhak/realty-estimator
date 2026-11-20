@@ -14,7 +14,7 @@ from data_processor import (
     DataProcessor,
 )
 from house_info_service import HouseInfoService
-from model import ValuationModel
+from model import MIN_ANALOGUES, ValuationModel
 
 app = FastAPI(title="Оценка недвижимости — Нижний Новгород")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -55,6 +55,7 @@ class ValuationRequest(BaseModel):
     dist_metro: Optional[float] = None
     year: Optional[int] = None
     zone: Optional[str] = None
+    sample_size: int = Field(default=40, ge=MIN_ANALOGUES)
 
 
 def _features_from_request(req: ValuationRequest) -> dict:
@@ -160,7 +161,15 @@ async def estimate(req: ValuationRequest):
     if house_info and house_info.latitude and house_info.longitude:
         latitude = float(house_info.latitude)
         longitude = float(house_info.longitude)
-    result = model.estimate(features, latitude=latitude, longitude=longitude)
+    try:
+        result = model.estimate(
+            features,
+            latitude=latitude,
+            longitude=longitude,
+            sample_size=req.sample_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if house_info and house_info.source != "not_found":
         result["house_info"] = house_info.to_dict()
     return result

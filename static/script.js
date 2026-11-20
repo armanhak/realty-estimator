@@ -202,6 +202,7 @@ document.getElementById("valuation-form").addEventListener("submit", async (even
         dist_metro: parseFloat(document.getElementById("dist_metro").value),
         year: parseInt(document.getElementById("year").value, 10),
         zone: document.getElementById("zone").value,
+        sample_size: parseInt(document.getElementById("sample_size").value, 10),
     };
 
     try {
@@ -360,7 +361,7 @@ function renderAnaloguesTable(result) {
         </tr>`).join("");
     const used = result.n_analogues_used || 0;
     document.getElementById("analogues-table").innerHTML = `
-        <p class="section-description">В цену входят все квартиры с весом не ниже 0,05. Если таких меньше 40, берутся 40 самых весомых: сейчас в расчёте ${used}. Коэффициенты и цена считаются по всей этой выборке. В таблице только 5 квартир с наибольшим весом — ближайшие ориентиры. Отдельно в формулу они не подставляются, их цены уже учтены в общем расчёте. Сходство — вес относительно самого весомого из этих пяти.</p>
+        <p class="section-description">В расчёт входят ${used} квартир с наибольшим весом — столько, сколько задано в поле «Число аналогов в расчёте». Коэффициенты, удельная цена, поправки и диапазон считаются только по ним. В таблице 5 квартир с наибольшим весом из этой выборки: это ориентиры, отдельно в формулу они не подставляются. Сходство — вес относительно самого весомого из этих пяти.</p>
         <table>
             <thead>
                 <tr>

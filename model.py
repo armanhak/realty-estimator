@@ -23,6 +23,8 @@ FEATURE_LABELS = {
 LOG_FEATURE_INDICES = [0, 9, 10, 11, 12]
 # На этом расстоянии по карте вес близости падает примерно до 60%.
 GEO_BANDWIDTH_M = 1500.0
+# В формуле 14 признаков, меньше этого числа выборка для коэффициентов слишком узкая.
+MIN_ANALOGUES = 15
 
 
 class _FittedModel:
@@ -75,6 +77,7 @@ class LocalWeightedRegressor:
         X_test: np.ndarray,
         origin: tuple = None,
         coordinates: np.ndarray = None,
+        sample_size: int = 40,
     ):
         x_row = np.asarray(X_test, dtype=float).reshape(1, -1)
         distances = cdist(x_row, X_train, metric="euclidean")[0]
@@ -84,12 +87,18 @@ class LocalWeightedRegressor:
             geo_weights, geo_meters = self._geo_weights(origin, coordinates)
             weights = weights * geo_weights
 
-        # Вес ниже 5% почти не двигает цену, но раздувает число «учтённых» аналогов.
-        mask = weights >= 0.05
-        if int(mask.sum()) < 40:
-            top_idx = np.argsort(weights)[-40:]
-            mask = np.zeros_like(weights, dtype=bool)
-            mask[top_idx] = True
+        # В формулу входят только квартиры с наибольшим весом, ровно sample_size штук.
+        n_rows = len(weights)
+        take = int(sample_size)
+        if take < MIN_ANALOGUES:
+            raise ValueError(
+                f"Число аналогов должно быть не меньше {MIN_ANALOGUES}: в формуле 14 признаков."
+            )
+        if take > n_rows:
+            take = n_rows
+        top_idx = np.argsort(weights)[-take:]
+        mask = np.zeros(n_rows, dtype=bool)
+        mask[top_idx] = True
 
         X_local = X_train[mask]
         y_local = y_train[mask]
@@ -188,7 +197,13 @@ class ValuationModel:
     def _reverse_map(value, mapping):
         return mapping.get(int(value), "—")
 
-    def estimate(self, features_dict: dict, latitude: float = None, longitude: float = None) -> dict:
+    def estimate(
+        self,
+        features_dict: dict,
+        latitude: float = None,
+        longitude: float = None,
+        sample_size: int = 40,
+    ) -> dict:
         x = np.array(
             [[
                 features_dict["area"],
@@ -223,6 +238,7 @@ class ValuationModel:
             x_scaled[0],
             origin=origin,
             coordinates=self.dp.coordinates,
+            sample_size=sample_size,
         )
         unit_price = float(np.exp(y_pred_log))
         area = max(float(features_dict["area"]), 1.0)
@@ -258,6 +274,7 @@ class ValuationModel:
             "analogues": analogues,
             "adjustments": adjustments,
             "n_analogues_used": int(len(indices)),
+            "sample_size": int(sample_size),
             "latitude": None if origin is None else origin[0],
             "longitude": None if origin is None else origin[1],
             "geo_bandwidth_m": None if origin is None else int(GEO_BANDWIDTH_M),

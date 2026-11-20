@@ -142,6 +142,11 @@
                         </select>
                     </div>
                 </div>
+                <div class="form-group sample-size-field">
+                    <label for="sample_size">Число аналогов в расчёте</label>
+                    <input type="number" id="sample_size" value="40" min="15" max="{{ stats.n_objects }}" step="1" required>
+                    <p class="section-hint">Берутся квартиры с наибольшим весом. Коэффициенты, удельная цена и диапазон считаются только по ним. Можно поставить 40, 100, 200 или другое число до {{ stats.n_objects }}.</p>
+                </div>
                 <button type="submit" class="btn-primary" id="btn-estimate">Рассчитать рыночную стоимость</button>
             </form>
         </section>
@@ -221,7 +226,7 @@
                             w_i = w^{\text{хар}}_i \cdot w^{\text{карта}}_i
                             \]
                             1500 — ширина ядра в метрах, а не весь знаменатель. Знаменатель равен \(2 \times 1500^2\). На расстоянии 1500 м вес близости около 61%, на 3 км — около 14%. Ближний дом остаётся важным, дальний почти выпадает.
-                            Квартиры с итоговым весом ниже 0,05 отбрасываются. Если после этого остаётся меньше 40, берутся 40 с наибольшим весом. По всей этой выборке считаются коэффициенты и цена.
+                            Дальше остаются квартиры с наибольшим итоговым весом. Сколько их — задаётся в поле «Число аналогов в расчёте», например 40, 100 или 200. Коэффициенты, удельная цена и диапазон считаются только по этим квартирам.
                         </li>
                         <li>
                             <strong>Формула по отобранным квартирам.</strong>
@@ -264,7 +269,7 @@
             <p>Оценка для ориентира. Итоговое суждение остаётся за специалистом.</p>
         </footer>
     </div>
-    <script src="/static/script.js?v=3"></script>
+    <script src="/static/script.js?v=4"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
         onload="renderMathInElement(document.body);"></script>
