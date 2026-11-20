@@ -122,8 +122,8 @@ class ValuationModel:
 
     def _compute_adjustments(self, model: _FittedModel, x_scaled: np.ndarray, feature_cols):
         """
-        Поправка фактора в рублях относительно цены при средних признаках:
-        base * (exp(coef_i * x_i) - 1).
+        Поправка фактора к удельной цене при средних признаках:
+        base * (exp(coef_i * x_i) - 1). В рубли квартиры её переводит площадь объекта.
         """
         base_price = float(np.exp(model.intercept_))
         adjustments = []
@@ -221,18 +221,24 @@ class ValuationModel:
             origin=origin,
             coordinates=self.dp.coordinates,
         )
-        y_pred = float(np.exp(y_pred_log))
+        unit_price = float(np.exp(y_pred_log))
+        area = max(float(features_dict["area"]), 1.0)
+        unit_price_rounded = int(round(unit_price))
+        y_pred = unit_price_rounded * area
 
         local_pred = fitted.predict(self.dp.X_scaled[indices])
         residuals = self.dp.y_log[indices] - local_pred
         sigma = float(np.sqrt(np.average(residuals ** 2, weights=weights)))
         sigma = max(sigma, 0.04)
-        ci_low = float(np.exp(y_pred_log - 1.96 * sigma))
-        ci_high = float(np.exp(y_pred_log + 1.96 * sigma))
+        ci_low = float(np.exp(y_pred_log - 1.96 * sigma)) * area
+        ci_high = float(np.exp(y_pred_log + 1.96 * sigma)) * area
 
-        adjustments, base_price, _predicted = self._compute_adjustments(
+        adjustments, base_unit, _predicted_unit = self._compute_adjustments(
             fitted, x_scaled, self.dp.feature_cols
         )
+        for item in adjustments:
+            item["money_adj"] *= area
+        base_price = base_unit * area
         object_values = self._get_feature_values(features_dict)
         for item in adjustments:
             item["object_value"] = object_values.get(item["feature"], "—")
@@ -240,6 +246,7 @@ class ValuationModel:
         analogues = self.dp.get_analogues(indices, weights, top_n=5, distances_m=geo_meters)
         return {
             "price": int(round(y_pred)),
+            "unit_price": unit_price_rounded,
             "base_price": int(round(base_price)),
             "ci_low": int(round(ci_low)),
             "ci_high": int(round(ci_high)),

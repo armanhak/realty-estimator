@@ -81,7 +81,10 @@ def load_and_clean_data(path: str) -> pd.DataFrame:
             median_val = float(positive.median()) if len(positive) else 0.0
             df[col] = df[col].where(df[col] > 0, median_val)
 
-    df["Общая площадь, кв.м"] = df["Общая площадь, кв.м"].fillna(df["Общая площадь, кв.м"].median())
+    area = df["Общая площадь, кв.м"]
+    positive_area = area[area > 0]
+    median_area = float(positive_area.median()) if len(positive_area) else 1.0
+    df["Общая площадь, кв.м"] = area.where(area > 0, median_area)
     df["Этаж"] = df["Этаж"].fillna(df["Этаж"].median())
     df["Этажность"] = df["Этажность"].fillna(df["Этажность"].median())
     df["Год постройки"] = df["Год постройки"].fillna(df["Год постройки"].median())
@@ -130,7 +133,9 @@ def prepare_features(df: pd.DataFrame):
 
     X = df[feature_cols].copy()
     y = df["Цена"].to_numpy(dtype=float)
-    y_log = np.log(y)
+    area = df["Общая площадь, кв.м"].to_numpy(dtype=float)
+    # Модель объясняет цену квадратного метра. Полная цена — это удельная, умноженная на площадь.
+    y_log = np.log(y / area)
 
     log_cols = [
         "Общая площадь, кв.м",

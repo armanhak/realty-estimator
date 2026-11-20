@@ -8,6 +8,10 @@ function formatPrice(price) {
     return Math.round(price).toLocaleString("ru-RU") + " ₽";
 }
 
+function formatUnitPrice(price) {
+    return Math.round(price).toLocaleString("ru-RU") + " ₽/м²";
+}
+
 function formatSignedPrice(price) {
     const sign = price >= 0 ? "+" : "−";
     return sign + " " + Math.abs(Math.round(price)).toLocaleString("ru-RU") + " ₽";
@@ -207,6 +211,7 @@ document.getElementById("valuation-form").addEventListener("submit", async (even
 
 function renderResult(result) {
     document.getElementById("price-value").textContent = formatPrice(result.price);
+    document.getElementById("unit-price").textContent = `Удельная цена: ${formatUnitPrice(result.unit_price)}`;
     document.getElementById("price-range").textContent =
         `Диапазон: ${formatPrice(result.ci_low)} — ${formatPrice(result.ci_high)}`;
     document.getElementById("analogues-count").textContent = result.n_analogues_used;
