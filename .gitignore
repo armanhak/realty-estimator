@@ -1,5 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
-.streamlit/secrets.toml
+house_info_cache.db
+data/house_info_cache.db
 .DS_Store
+.streamlit/

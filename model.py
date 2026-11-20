@@ -1,24 +1,47 @@
 import numpy as np
 from scipy.spatial.distance import cdist
-from sklearn.linear_model import LinearRegression
+
+
+FEATURE_LABELS = {
+    "Общая площадь, кв.м": "Площадь",
+    "Количество комнат": "Комнатность",
+    "Этаж": "Этаж квартиры",
+    "Этажность": "Этажность дома",
+    "Тип этажа": "Тип этажа",
+    "Состояние отделки": "Состояние ремонта",
+    "Материал стен": "Материал стен",
+    "Есть балкон": "Балкон или лоджия",
+    "Раздельный санузел": "Раздельный санузел",
+    "Расстояние до центра, м.": "Расстояние до центра",
+    "Ближайшая остановка, м.": "Ближайшая остановка",
+    "Ближайшее метро, м.": "Ближайшее метро",
+    "Год постройки": "Год постройки",
+    "Зона": "Район и зона",
+}
+
+# Площадь, расстояние до центра, остановка, метро, год.
+LOG_FEATURE_INDICES = [0, 9, 10, 11, 12]
 
 
 class _FittedModel:
     """Коэффициенты признаков отдельно от свободного члена."""
 
     def __init__(self, coef: np.ndarray, intercept: float):
-        self.coef_ = coef
-        self.intercept_ = intercept
+        self.coef_ = np.asarray(coef, dtype=float)
+        self.intercept_ = float(intercept)
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        matrix = np.asarray(X, dtype=float)
+        if matrix.ndim == 1:
+            matrix = matrix.reshape(1, -1)
+        return matrix @ self.coef_ + self.intercept_
 
 
 class LocalWeightedRegressor:
     """
     Локальная взвешенная мультипликативная регрессия.
-    Для каждого объекта оценки:
-      1. Считаем расстояния до всех объектов базы
-      2. Применяем гауссово ядро → получаем веса
-      3. Решаем взвешенную регрессию
-      4. Получаем прогноз
+    Ближние объекты получают больший вес через гауссово ядро.
+    Свободный член тоже взвешивается, иначе перехват смещает оценку.
     """
 
     def __init__(self, bandwidth: float = 1.5):
@@ -28,18 +51,14 @@ class LocalWeightedRegressor:
         return np.exp(-(distances ** 2) / (2 * self.bandwidth ** 2))
 
     def predict(self, X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray):
-        """
-        Возвращает прогноз в log-шкале, индексы аналогов, их веса и модель.
-        Свободный член тоже взвешивается: sqrt(w) умножается на всю матрицу
-        [X | 1], иначе перехват смещает оценку.
-        """
         x_row = np.asarray(X_test, dtype=float).reshape(1, -1)
         distances = cdist(x_row, X_train, metric="euclidean")[0]
         weights = self._gaussian_weights(distances)
 
-        mask = weights > 1e-6
-        if mask.sum() < 5:
-            top_idx = np.argsort(weights)[-50:]
+        # Вес ниже 5% почти не двигает цену, но раздувает число «учтённых» аналогов.
+        mask = weights >= 0.05
+        if int(mask.sum()) < 40:
+            top_idx = np.argsort(weights)[-40:]
             mask = np.zeros_like(weights, dtype=bool)
             mask[top_idx] = True
 
@@ -48,16 +67,22 @@ class LocalWeightedRegressor:
         w_local = weights[mask]
         indices_local = np.where(mask)[0]
 
+        # Штраф только на наклоны: свободный член — это базовая цена и его нельзя прижимать к нулю.
         sw = np.sqrt(w_local)
-        design = np.column_stack([X_local, np.ones(len(X_local))])
-        model = LinearRegression(fit_intercept=False)
-        model.fit(design * sw[:, None], y_local * sw)
+        weighted_x = X_local * sw[:, None]
+        weighted_y = y_local * sw
+        n_features = X_local.shape[1]
+        system = np.zeros((n_features + 1, n_features + 1))
+        system[:n_features, :n_features] = weighted_x.T @ weighted_x + np.eye(n_features)
+        system[:n_features, n_features] = weighted_x.T @ sw
+        system[n_features, :n_features] = sw @ weighted_x
+        system[n_features, n_features] = float(np.dot(sw, sw))
+        right_hand = np.append(weighted_x.T @ weighted_y, float(np.dot(sw, weighted_y)))
+        solution = np.linalg.solve(system, right_hand)
+        fitted = _FittedModel(coef=solution[:-1], intercept=float(solution[-1]))
 
-        x_aug = np.append(x_row.ravel(), 1.0)
-        y_pred_log = float(model.predict(x_aug.reshape(1, -1))[0])
-        fitted = _FittedModel(coef=model.coef_[:-1], intercept=float(model.coef_[-1]))
-
-        return y_pred_log, indices_local, w_local, fitted
+        y_pred_log = float(fitted.predict(x_row)[0])
+        return y_pred_log, indices_local, w_local, fitted, X_local
 
 
 class ValuationModel:
@@ -65,11 +90,72 @@ class ValuationModel:
         self.dp = data_processor
         self.regressor = LocalWeightedRegressor(bandwidth=bandwidth)
 
+    def _compute_adjustments(self, model: _FittedModel, x_scaled: np.ndarray, feature_cols):
+        """
+        Поправка фактора в рублях относительно цены при средних признаках:
+        base * (exp(coef_i * x_i) - 1).
+        """
+        base_price = float(np.exp(model.intercept_))
+        adjustments = []
+        for i, name in enumerate(feature_cols):
+            log_contribution = float(model.coef_[i] * x_scaled[0, i])
+            money_adjustment = base_price * np.exp(log_contribution) - base_price
+            pct_adjustment = (np.exp(log_contribution) - 1) * 100
+            adjustments.append(
+                {
+                    "feature": name,
+                    "label": FEATURE_LABELS.get(name, name),
+                    "coef": float(model.coef_[i]),
+                    "scaled_value": float(x_scaled[0, i]),
+                    "money_adj": float(money_adjustment),
+                    "pct_adj": float(pct_adjustment),
+                }
+            )
+        adjustments.sort(key=lambda item: -abs(item["money_adj"]))
+        predicted = float(np.exp(model.predict(x_scaled)[0]))
+        return adjustments, base_price, predicted
+
+    def _get_feature_values(self, features_dict: dict) -> dict:
+        return {
+            "Общая площадь, кв.м": f"{features_dict['area']} м²",
+            "Количество комнат": "Студия" if int(features_dict["rooms"]) == 0 else str(features_dict["rooms"]),
+            "Этаж": str(features_dict["floor"]),
+            "Этажность": str(features_dict["total_floors"]),
+            "Тип этажа": self._reverse_map(
+                features_dict["floor_type"],
+                {1: "Первый", 2: "Средний", 3: "Последний"},
+            ),
+            "Состояние отделки": self._reverse_map(
+                features_dict["repair"],
+                {1: "Требует ремонта", 2: "Под чистовую", 3: "Типовой ремонт", 4: "Комфортный ремонт"},
+            ),
+            "Материал стен": self._reverse_map(
+                features_dict["material"],
+                {1: "Деревянный", 2: "Панельный", 3: "Блочный", 4: "Кирпичный", 5: "Монолитный"},
+            ),
+            "Есть балкон": "Есть" if features_dict["balcony"] else "Нет",
+            "Раздельный санузел": "Да" if features_dict["split_bathroom"] else "Нет",
+            "Расстояние до центра, м.": f"{int(features_dict['dist_center'])} м",
+            "Ближайшая остановка, м.": f"{int(features_dict['dist_stop'])} м",
+            "Ближайшее метро, м.": f"{int(features_dict['dist_metro'])} м",
+            "Год постройки": str(features_dict["year"]),
+            "Зона": self._reverse_map(
+                features_dict["zone"],
+                {
+                    1: "Окраина или промзона",
+                    2: "Автомагистраль или ИЖС",
+                    3: "Жилая застройка",
+                    4: "Деловой центр",
+                    5: "Исторический центр",
+                },
+            ),
+        }
+
+    @staticmethod
+    def _reverse_map(value, mapping):
+        return mapping.get(int(value), "—")
+
     def estimate(self, features_dict: dict) -> dict:
-        """
-        Принимает словарь с характеристиками объекта.
-        Возвращает оценку, доверительный интервал, аналоги и вклад факторов.
-        """
         x = np.array(
             [[
                 features_dict["area"],
@@ -91,46 +177,36 @@ class ValuationModel:
         )
 
         x_log = x.copy()
-        x_log[0, 0] = np.log1p(max(x_log[0, 0], 0))
-        x_log[0, 9] = np.log1p(max(x_log[0, 9], 0))
-        x_log[0, 10] = np.log1p(max(x_log[0, 10], 0))
-        x_log[0, 11] = np.log1p(max(x_log[0, 11], 0))
-        x_log[0, 12] = np.log1p(max(x_log[0, 12], 0))
+        for idx in LOG_FEATURE_INDICES:
+            x_log[0, idx] = np.log1p(max(0.0, x_log[0, idx]))
 
         x_scaled = self.dp.scaler.transform(x_log)
-
-        y_pred_log, indices, weights, model = self.regressor.predict(
+        y_pred_log, indices, weights, fitted, _x_local = self.regressor.predict(
             self.dp.X_scaled, self.dp.y_log, x_scaled[0]
         )
         y_pred = float(np.exp(y_pred_log))
 
-        analog_prices = self.dp.y[indices]
-        weighted_mean = np.average(analog_prices, weights=weights)
-        weighted_var = np.average((analog_prices - weighted_mean) ** 2, weights=weights)
-        weighted_std = float(np.sqrt(weighted_var))
-        ci_low = max(0.0, weighted_mean - 1.96 * weighted_std)
-        ci_high = weighted_mean + 1.96 * weighted_std
+        local_pred = fitted.predict(self.dp.X_scaled[indices])
+        residuals = self.dp.y_log[indices] - local_pred
+        sigma = float(np.sqrt(np.average(residuals ** 2, weights=weights)))
+        sigma = max(sigma, 0.04)
+        ci_low = float(np.exp(y_pred_log - 1.96 * sigma))
+        ci_high = float(np.exp(y_pred_log + 1.96 * sigma))
 
-        factor_names = self.dp.feature_cols
-        factor_contributions = []
-        for i, (name, coef) in enumerate(zip(factor_names, model.coef_)):
-            factor_contributions.append(
-                {
-                    "feature": name,
-                    "coef": float(coef),
-                    "impact": float(coef * x_scaled[0, i]),
-                }
-            )
-        factor_contributions.sort(key=lambda item: -abs(item["impact"]))
+        adjustments, base_price, _predicted = self._compute_adjustments(
+            fitted, x_scaled, self.dp.feature_cols
+        )
+        object_values = self._get_feature_values(features_dict)
+        for item in adjustments:
+            item["object_value"] = object_values.get(item["feature"], "—")
 
         analogues = self.dp.get_analogues(indices, weights, top_n=5)
-
         return {
             "price": int(round(y_pred)),
+            "base_price": int(round(base_price)),
             "ci_low": int(round(ci_low)),
             "ci_high": int(round(ci_high)),
             "analogues": analogues,
-            "factors": factor_contributions,
+            "adjustments": adjustments,
             "n_analogues_used": int(len(indices)),
-            "log_intercept": float(model.intercept_),
         }

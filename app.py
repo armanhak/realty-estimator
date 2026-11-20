@@ -1,8 +1,6 @@
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
 from data_processor import (
@@ -12,6 +10,7 @@ from data_processor import (
     ZONE_MAP,
     DataProcessor,
 )
+from house_info_service import HouseInfoService
 from model import ValuationModel
 
 st.set_page_config(
@@ -21,255 +20,267 @@ st.set_page_config(
 )
 
 DATA_PATH = Path(__file__).resolve().parent / "data" / "apartments.xlsx"
+ROOM_LABELS = {0: "Студия", 1: "1", 2: "2", 3: "3", 4: "4 и более"}
 
 
 @st.cache_resource
-def load_processor():
-    return DataProcessor(str(DATA_PATH))
+def load_services():
+    processor = DataProcessor(str(DATA_PATH))
+    valuation = ValuationModel(processor)
+    houses = HouseInfoService(
+        {
+            "dataset_path": str(DATA_PATH),
+            "yandex_api_key": None,
+            "use_cache": False,
+        },
+        df=processor.df,
+    )
+    return processor, valuation, houses
 
 
-@st.cache_resource
-def load_model(_dp):
-    return ValuationModel(_dp)
-
-
-dp = load_processor()
-model = load_model(dp)
+dp, model, house_service = load_services()
 stats = dp.get_stats()
+
+DEFAULTS = {
+    "address": "",
+    "area": 55.0,
+    "rooms": 2,
+    "floor": 5,
+    "total_floors": 9,
+    "floor_type": "Средний",
+    "repair": "Типовой ремонт",
+    "material": "Кирпичный",
+    "year": 1985,
+    "dist_center": 7000,
+    "dist_metro": 1500,
+    "dist_stop": 300,
+    "zone": "Многоквартирная жилая застройка",
+    "balcony": "Есть",
+    "bathroom": "Раздельный",
+    "house": None,
+    "house_message": "",
+    "result": None,
+}
+for key, value in DEFAULTS.items():
+    st.session_state.setdefault(key, value)
 
 
 def format_price(price: float) -> str:
-    return f"{int(price):,}".replace(",", " ") + " ₽"
+    return f"{int(round(price)):,}".replace(",", " ") + " ₽"
 
 
-def feature_label(name: str) -> str:
-    labels = {
-        "Общая площадь, кв.м": "📐 Площадь",
-        "Количество комнат": "🚪 Комнаты",
-        "Этаж": "🏢 Этаж",
-        "Этажность": "🏗 Этажность",
-        "Тип этажа": "📍 Тип этажа",
-        "Состояние отделки": "🔨 Ремонт",
-        "Материал стен": "🧱 Материал",
-        "Есть балкон": "🪴 Балкон",
-        "Раздельный санузел": "🚿 Санузел",
-        "Расстояние до центра, м.": "🏙 До центра",
-        "Ближайшая остановка, м.": "🚌 Остановка",
-        "Ближайшее метро, м.": "🚇 Метро",
-        "Год постройки": "📅 Год",
-        "Зона": "🗺 Район",
+def format_signed_price(price: float) -> str:
+    sign = "+" if price >= 0 else "−"
+    return sign + " " + f"{int(round(abs(price))):,}".replace(",", " ") + " ₽"
+
+
+def load_house() -> None:
+    typed = (st.session_state.get("address") or "").strip()
+    query = typed
+    if len(query) < 3:
+        st.session_state.house = None
+        st.session_state.house_message = "Введите адрес дома."
+        return
+
+    info = house_service.get_house_info(query, use_poi=False)
+    if info.confidence == "low" or info.source == "not_found":
+        st.session_state.house = None
+        st.session_state.house_message = "Адрес не найден в базе."
+        return
+
+    st.session_state.house = info.to_dict()
+    st.session_state.house_message = ""
+    st.session_state.address = info.address
+    if info.year_built:
+        st.session_state.year = int(info.year_built)
+    if info.floors:
+        st.session_state.total_floors = int(info.floors)
+        if int(st.session_state.floor) > int(info.floors):
+            st.session_state.floor = int(info.floors)
+        floor = int(st.session_state.floor)
+        if floor <= 1:
+            st.session_state.floor_type = "Первый"
+        elif floor >= int(info.floors):
+            st.session_state.floor_type = "Последний"
+    if info.material in MATERIAL_MAP:
+        st.session_state.material = info.material
+    if info.zone in ZONE_MAP:
+        st.session_state.zone = info.zone
+    if info.dist_to_center:
+        st.session_state.dist_center = int(info.dist_to_center)
+    if info.nearest_metro:
+        st.session_state.dist_metro = int(info.nearest_metro)
+    if info.nearest_bus_stop:
+        st.session_state.dist_stop = int(info.nearest_bus_stop)
+
+
+def use_suggestion() -> None:
+    st.session_state.address = st.session_state.address_pick
+    load_house()
+
+
+def estimate_from_form() -> None:
+    floor = int(st.session_state.floor)
+    total_floors = int(st.session_state.total_floors)
+    if floor > total_floors:
+        total_floors = floor
+        st.session_state.total_floors = total_floors
+    features = {
+        "area": float(st.session_state.area),
+        "rooms": int(st.session_state.rooms),
+        "floor": floor,
+        "total_floors": total_floors,
+        "floor_type": FLOOR_TYPE_MAP.get(st.session_state.floor_type, 2),
+        "repair": REPAIR_MAP.get(st.session_state.repair, 3),
+        "material": MATERIAL_MAP.get(st.session_state.material, 3),
+        "balcony": 1 if st.session_state.balcony == "Есть" else 0,
+        "split_bathroom": 1 if st.session_state.bathroom == "Раздельный" else 0,
+        "dist_center": float(st.session_state.dist_center),
+        "dist_stop": float(st.session_state.dist_stop),
+        "dist_metro": float(st.session_state.dist_metro),
+        "year": int(st.session_state.year),
+        "zone": ZONE_MAP.get(st.session_state.zone, 3),
     }
-    return labels.get(name, name)
+    st.session_state.result = model.estimate(features)
 
 
-st.markdown(
-    """
-# 🏠 Оценка рыночной стоимости квартиры
-### Нижний Новгород — автоматизированная система оценки на основе 1000+ объектов
-
-*Метод: мультипликативная регрессия с локальным взвешиванием по сходству объектов*
-"""
+st.title("Оценка рыночной стоимости квартиры")
+st.caption(
+    f"Нижний Новгород · база из {stats['n_objects']} объектов · "
+    f"цены от {format_price(stats['price_min'])} до {format_price(stats['price_max'])}"
+)
+st.write(
+    "Похожие квартиры влияют на цену сильнее, чем объекты с другими характеристиками."
 )
 
-st.markdown("---")
-st.markdown("### 📋 Характеристики оцениваемой квартиры")
+st.subheader("Шаг 1. Адрес дома")
+with st.form("house_lookup"):
+    st.text_input(
+        "Адрес",
+        key="address",
+        placeholder="Например: Грузинская улица, 46",
+    )
+    st.form_submit_button("Загрузить характеристики", on_click=load_house)
 
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    area = st.number_input(
-        "Общая площадь, м²", min_value=10.0, max_value=300.0, value=55.0, step=1.0
-    )
-    rooms = st.selectbox(
-        "Количество комнат",
-        [0, 1, 2, 3, 4],
-        format_func=lambda x: "Студия" if x == 0 else ("4 и более" if x == 4 else str(x)),
-        index=2,
-    )
-    floor = st.number_input("Этаж квартиры", min_value=1, max_value=50, value=5)
-    total_floors = st.number_input("Этажность дома", min_value=1, max_value=50, value=9)
-
-with col2:
-    floor_type_name = st.selectbox("Тип этажа", list(FLOOR_TYPE_MAP.keys()), index=1)
-    repair_name = st.selectbox(
-        "Состояние ремонта",
-        ["Требует ремонта", "Типовой ремонт", "Комфортный ремонт"],
-        index=1,
-    )
-    material_name = st.selectbox(
-        "Материал стен",
-        ["Кирпичный", "Панельный", "Монолитный", "Блочный"],
-        index=0,
-    )
-    year = st.number_input("Год постройки", min_value=1900, max_value=2026, value=1985)
-
-with col3:
-    balcony = st.selectbox("Балкон/лоджия", [0, 1], format_func=lambda x: "Есть" if x else "Нет")
-    split_bath = st.selectbox(
-        "Санузел", [0, 1], format_func=lambda x: "Раздельный" if x else "Совмещённый"
-    )
-    dist_center = st.number_input(
-        "Расстояние до центра, м", min_value=0, max_value=30000, value=7000, step=100
-    )
-    zone_name = st.selectbox("Зона / район", list(ZONE_MAP.keys()), index=2)
-
-dist1, dist2 = st.columns(2)
-with dist1:
-    dist_stop = st.number_input(
-        "Ближайшая остановка, м", min_value=0, max_value=10000, value=300, step=50
-    )
-with dist2:
-    dist_metro = st.number_input(
-        "Ближайшее метро, м", min_value=0, max_value=30000, value=1500, step=50
+suggestions = []
+query = (st.session_state.address or "").strip()
+if len(query) >= 3:
+    suggestions = house_service.suggest_addresses(query, limit=7)
+if suggestions:
+    if st.session_state.get("address_pick") not in suggestions:
+        st.session_state.address_pick = suggestions[0]
+    st.selectbox(
+        "Или выберите адрес из базы",
+        suggestions,
+        key="address_pick",
+        on_change=use_suggestion,
     )
 
-st.markdown("---")
-if st.button("🎯 Рассчитать рыночную стоимость", type="primary", use_container_width=True):
-    with st.spinner("Анализируем базу объектов и подбираем аналоги..."):
-        features = {
-            "area": area,
-            "rooms": rooms,
-            "floor": floor,
-            "total_floors": total_floors,
-            "floor_type": FLOOR_TYPE_MAP[floor_type_name],
-            "repair": REPAIR_MAP[repair_name],
-            "material": MATERIAL_MAP[material_name],
-            "balcony": balcony,
-            "split_bathroom": split_bath,
-            "dist_center": dist_center,
-            "dist_stop": dist_stop,
-            "dist_metro": dist_metro,
-            "year": year,
-            "zone": ZONE_MAP[zone_name],
+if st.session_state.house_message:
+    st.warning(st.session_state.house_message)
+
+house = st.session_state.house
+if house:
+    st.markdown(f"**{house['address']}**")
+    cards = st.columns(4)
+    cards[0].metric("Год постройки", house.get("year_built") or "—")
+    cards[1].metric("Материал", house.get("material") or "—")
+    cards[2].metric("Этажность", f"{house['floors']} эт." if house.get("floors") else "—")
+    cards[3].metric("Парковка", house.get("parking_type") or "—")
+    cards = st.columns(4)
+    cards[0].metric("Зона", house.get("zone") or "—")
+    cards[1].metric("До центра", f"{house['dist_to_center']} м" if house.get("dist_to_center") else "—")
+    cards[2].metric("До метро", f"{house['nearest_metro']} м" if house.get("nearest_metro") else "—")
+    cards[3].metric("До остановки", f"{house['nearest_bus_stop']} м" if house.get("nearest_bus_stop") else "—")
+
+st.subheader("Шаг 2. Характеристики квартиры")
+with st.form("valuation"):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.number_input("Площадь, м²", min_value=10.0, max_value=300.0, step=0.1, key="area")
+        st.selectbox(
+            "Количество комнат",
+            list(ROOM_LABELS),
+            format_func=lambda value: ROOM_LABELS[value],
+            key="rooms",
+        )
+        st.number_input("Этаж квартиры", min_value=1, max_value=50, step=1, key="floor")
+        st.number_input("Этажность дома", min_value=1, max_value=50, step=1, key="total_floors")
+        st.selectbox("Тип этажа", list(FLOOR_TYPE_MAP), key="floor_type")
+    with col2:
+        st.selectbox("Состояние ремонта", list(REPAIR_MAP), key="repair")
+        st.selectbox("Материал стен", list(MATERIAL_MAP), key="material")
+        st.number_input("Год постройки", min_value=1900, max_value=2026, step=1, key="year")
+        st.number_input("Расстояние до центра, м", min_value=0, max_value=30000, step=1, key="dist_center")
+        st.number_input("Ближайшее метро, м", min_value=0, max_value=30000, step=1, key="dist_metro")
+    with col3:
+        st.number_input("Ближайшая остановка, м", min_value=0, max_value=5000, step=1, key="dist_stop")
+        st.selectbox("Зона", list(ZONE_MAP), key="zone")
+        st.selectbox("Балкон или лоджия", ["Есть", "Нет"], key="balcony")
+        st.selectbox("Санузел", ["Раздельный", "Совмещённый"], key="bathroom")
+    submitted = st.form_submit_button("Рассчитать рыночную стоимость", type="primary")
+
+if submitted:
+    estimate_from_form()
+
+result = st.session_state.result
+if result:
+    st.subheader("Результат оценки")
+    left, right = st.columns([2, 1])
+    left.metric("Рыночная стоимость", format_price(result["price"]))
+    left.caption(f"Диапазон: {format_price(result['ci_low'])} — {format_price(result['ci_high'])}")
+    right.metric("Учтено аналогов", result["n_analogues_used"])
+
+    st.markdown("**Поправки к рыночной стоимости**")
+    st.caption(
+        f"Базовая стоимость при средних характеристиках: {format_price(result['base_price'])}. "
+        "Каждая строка показывает влияние параметра отдельно. Итог — разница между оценкой и базой."
+    )
+    adjustment_rows = []
+    for index, item in enumerate(result["adjustments"], start=1):
+        adjustment_rows.append(
+            {
+                "№": index,
+                "Параметр": item["label"],
+                "У объекта": item["object_value"],
+                "Поправка, ₽": format_signed_price(item["money_adj"]),
+                "Поправка, %": f"{item['pct_adj']:+.1f}%",
+                "Влияние": "Повышает" if item["money_adj"] >= 0 else "Снижает",
+            }
+        )
+    st.dataframe(pd.DataFrame(adjustment_rows), use_container_width=True, hide_index=True)
+
+    chart = pd.DataFrame(
+        {
+            "Параметр": [item["label"] for item in result["adjustments"][:8]],
+            "Поправка, тыс. ₽": [item["money_adj"] / 1000 for item in result["adjustments"][:8]],
         }
-        result = model.estimate(features)
+    ).set_index("Параметр")
+    st.bar_chart(chart)
 
-    st.session_state["result"] = result
-    st.session_state["features"] = features
+    st.markdown("**Ближайшие аналоги из базы**")
+    analogue_rows = [
+        {
+            "Адрес": item["address"],
+            "Площадь, м²": item["area"],
+            "Комнаты": item["rooms"],
+            "Этаж": item["floor"],
+            "Материал": item["material"],
+            "Год": item["year"],
+            "Ремонт": item["repair"],
+            "Цена": format_price(item["price"]),
+            "Сходство": f"{item['similarity']}%",
+        }
+        for item in result["analogues"]
+    ]
+    st.dataframe(pd.DataFrame(analogue_rows), use_container_width=True, hide_index=True)
 
-
-if "result" in st.session_state:
-    result = st.session_state["result"]
-
-    st.markdown("---")
-    st.markdown("### 💰 Результат оценки")
-
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        st.metric(
-            label="Рыночная стоимость",
-            value=format_price(result["price"]),
-            delta=f"диапазон: {format_price(result['ci_low'])} — {format_price(result['ci_high'])}",
-        )
-    with col_b:
-        st.metric(
-            label="Учтено аналогов",
-            value=result["n_analogues_used"],
-            delta="из базы",
-        )
-
-    with st.expander("📊 Из чего сложилась цена (вклад факторов)", expanded=True):
-        factors = result["factors"]
-        base = float(np.exp(result["log_intercept"]))
-        names = ["Средний объект"]
-        measures = ["absolute"]
-        values = [base]
-        texts = [format_price(base)]
-        running = base
-        for factor in factors:
-            nxt = running * float(np.exp(factor["impact"]))
-            delta = nxt - running
-            running = nxt
-            names.append(feature_label(factor["feature"]))
-            measures.append("relative")
-            values.append(delta)
-            texts.append(format_price(abs(delta)) + (" ▲" if delta > 0 else " ▼"))
-        names.append("Оценка")
-        measures.append("total")
-        values.append(result["price"])
-        texts.append(format_price(result["price"]))
-
-        fig = go.Figure(
-            go.Waterfall(
-                name="Вклад фактора",
-                orientation="v",
-                measure=measures,
-                x=names,
-                y=values,
-                text=texts,
-                textposition="outside",
-                connector={"line": {"color": "rgb(63, 63, 63)"}},
-                increasing={"marker": {"color": "#2ecc71"}},
-                decreasing={"marker": {"color": "#e74c3c"}},
-                totals={"marker": {"color": "#3498db"}},
-            )
-        )
-        fig.update_layout(
-            height=460,
-            margin=dict(l=20, r=20, t=40, b=80),
-            xaxis_tickangle=-30,
-            yaxis_title="₽",
-            title="Влияние характеристик на итоговую цену",
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption(
-            "Старт — цена «средней» квартиры в локальной выборке. "
-            "Каждый столбец — насколько признак сдвигает её относительно среднего по базе. "
-            "Последний столбец совпадает с оценкой."
-        )
-
-    with st.expander("🏘 Ближайшие аналоги из базы (на чём основана оценка)", expanded=True):
-        analogues_df = pd.DataFrame(result["analogues"])
-        analogues_df["Цена"] = analogues_df["price"].apply(format_price)
-        analogues_df["Сходство"] = analogues_df["similarity"].apply(lambda x: f"{x}%")
-        analogues_df = analogues_df[
-            ["address", "area", "rooms", "floor", "material", "year", "repair", "Цена", "Сходство"]
-        ]
-        analogues_df.columns = [
-            "Адрес",
-            "Площадь",
-            "Комнаты",
-            "Этаж",
-            "Материал",
-            "Год",
-            "Ремонт",
-            "Цена",
-            "Сходство",
-        ]
-        st.dataframe(analogues_df, use_container_width=True, hide_index=True)
-
-    with st.expander("🧠 Как работает метод оценки?"):
+    with st.expander("Как считается оценка"):
         st.markdown(
             """
-        **Локальная взвешенная регрессия** работает по принципу опытного оценщика:
-
-        1. **Поиск аналогов.** Система сравнивает ваш объект со всеми квартирами в базе
-           по 14 параметрам (площадь, этаж, район, материал, ремонт и т.д.).
-
-        2. **Взвешивание.** Объекты, более похожие на ваш, получают больший вес
-           (гауссово ядро). Сильно отличающиеся объекты почти не влияют на результат.
-
-        3. **Локальная регрессия.** На взвешенной выборке строится регрессия
-           логарифма цены: влияние площади и расстояний мультипликативное.
-
-        4. **Результат.** Итоговая цена — прогноз этой модели, а диапазон —
-           статистический разброс цен среди объектов с ненулевым весом.
-        """
+Система сравнивает квартиру с объектами базы по площади, этажу, ремонту, материалу, году и расположению.
+Похожим квартирам даётся больший вес, сильно отличающиеся почти не влияют на цену.
+Диапазон — коридор, в котором обычно лежит оценка для квартир с таким набором параметров.
+Оценка нужна для ориентира. Итоговое суждение остаётся за специалистом.
+"""
         )
-
-
-st.markdown("---")
-st.markdown(
-    f"""
-<small>
-
-📊 База данных: **{stats['n_objects']}** объектов ·
-Диапазон цен: **{format_price(stats['price_min'])}** — **{format_price(stats['price_max'])}** ·
-Медиана: **{format_price(stats['price_median'])}**
-
-© 2026 · Система автоматизированной оценки недвижимости
-
-</small>
-""",
-    unsafe_allow_html=True,
-)
