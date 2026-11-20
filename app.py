@@ -1,3 +1,4 @@
+import html
 from pathlib import Path
 
 import pandas as pd
@@ -17,6 +18,85 @@ st.set_page_config(
     page_title="Оценка недвижимости — Нижний Новгород",
     page_icon="🏠",
     layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# Те же цвета и карточки, что у локального сайта. Файл config.toml фиксирует тему
+# и на компьютере, и на Streamlit Cloud, иначе облако подставляет свою.
+st.markdown(
+    """
+    <style>
+    [data-testid="stAppViewContainer"] {
+        background: linear-gradient(160deg, #1f3b73 0%, #3d6b8a 45%, #d7e4ea 100%);
+        color: #243044;
+    }
+    [data-testid="stHeader"] { background: transparent; }
+    [data-testid="stToolbar"] { background: transparent; }
+    .block-container {
+        max-width: 1100px;
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 2rem 2.2rem 2.4rem;
+        box-shadow: 0 10px 30px rgba(20, 35, 60, 0.12);
+    }
+    h1, h2, h3, p, label, span { color: #243044; }
+    .subtitle { color: #5c6b7a; font-size: 16px; margin: 0 0 6px; text-align: center; }
+    .method { color: #7b8794; font-size: 14px; text-align: center; margin-bottom: 8px; }
+    .page-title { text-align: center; font-size: 28px; margin: 0 0 8px; }
+    .stTextInput input, .stNumberInput input, [data-baseweb="select"] > div {
+        border: 2px solid #e0e6ed !important;
+        border-radius: 8px !important;
+        background: #ffffff !important;
+    }
+    .stFormSubmitButton button {
+        background: #1f4e79 !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 10px !important;
+        font-weight: 600 !important;
+        width: 100%;
+        padding: 0.7rem 1rem !important;
+    }
+    .stFormSubmitButton button:hover { background: #173e61 !important; color: #ffffff !important; }
+    div[data-testid="stMetric"] {
+        background: #f6f8fb;
+        border-radius: 12px;
+        padding: 14px 12px;
+        border-left: 4px solid #1f4e79;
+    }
+    .price-card {
+        background: #1f6b4a;
+        color: #ffffff;
+        border-radius: 12px;
+        padding: 28px;
+        text-align: center;
+    }
+    .price-card .price-label { color: rgba(255,255,255,0.9); font-size: 14px; }
+    .price-card .price-value { color: #ffffff; font-size: 36px; font-weight: 700; margin: 8px 0; }
+    .price-card .price-range { color: #ffffff; font-size: 15px; }
+    .house-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+    }
+    .house-card {
+        background: #f6f8fb;
+        border-radius: 10px;
+        padding: 12px;
+        text-align: center;
+        border-left: 4px solid #1f4e79;
+    }
+    .house-card .info-label {
+        color: #7b8794;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .house-card .info-value { font-size: 16px; font-weight: 700; margin-top: 4px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 DATA_PATH = Path(__file__).resolve().parent / "data" / "apartments.xlsx"
@@ -144,13 +224,13 @@ def estimate_from_form() -> None:
     st.session_state.result = model.estimate(features)
 
 
-st.title("Оценка рыночной стоимости квартиры")
-st.caption(
-    f"Нижний Новгород · база из {stats['n_objects']} объектов · "
-    f"цены от {format_price(stats['price_min'])} до {format_price(stats['price_max'])}"
-)
-st.write(
-    "Похожие квартиры влияют на цену сильнее, чем объекты с другими характеристиками."
+st.markdown(
+    f"""
+    <h1 class="page-title">Оценка рыночной стоимости квартиры</h1>
+    <p class="subtitle">Нижний Новгород · база из {stats['n_objects']} объектов · цены от {format_price(stats['price_min'])} до {format_price(stats['price_max'])}</p>
+    <p class="method">Похожие квартиры влияют на цену сильнее, чем объекты с другими характеристиками.</p>
+    """,
+    unsafe_allow_html=True,
 )
 
 st.subheader("Шаг 1. Адрес дома")
@@ -179,19 +259,30 @@ if suggestions:
 if st.session_state.house_message:
     st.warning(st.session_state.house_message)
 
+def _card(label: str, value) -> str:
+    text = "—" if value in (None, "") else str(value)
+    return (
+        f'<div class="house-card"><div class="info-label">{html.escape(label)}</div>'
+        f'<div class="info-value">{html.escape(text)}</div></div>'
+    )
+
+
 house = st.session_state.house
 if house:
-    st.markdown(f"**{house['address']}**")
-    cards = st.columns(4)
-    cards[0].metric("Год постройки", house.get("year_built") or "—")
-    cards[1].metric("Материал", house.get("material") or "—")
-    cards[2].metric("Этажность", f"{house['floors']} эт." if house.get("floors") else "—")
-    cards[3].metric("Парковка", house.get("parking_type") or "—")
-    cards = st.columns(4)
-    cards[0].metric("Зона", house.get("zone") or "—")
-    cards[1].metric("До центра", f"{house['dist_to_center']} м" if house.get("dist_to_center") else "—")
-    cards[2].metric("До метро", f"{house['nearest_metro']} м" if house.get("nearest_metro") else "—")
-    cards[3].metric("До остановки", f"{house['nearest_bus_stop']} м" if house.get("nearest_bus_stop") else "—")
+    st.markdown(
+        "<div class='house-grid'>"
+        + _card("Адрес", house.get("address"))
+        + _card("Год постройки", house.get("year_built"))
+        + _card("Материал", house.get("material"))
+        + _card("Этажность", f"{house['floors']} эт." if house.get("floors") else "—")
+        + _card("Парковка", house.get("parking_type"))
+        + _card("Зона", house.get("zone"))
+        + _card("До центра", f"{house['dist_to_center']} м" if house.get("dist_to_center") else "—")
+        + _card("До метро", f"{house['nearest_metro']} м" if house.get("nearest_metro") else "—")
+        + _card("До остановки", f"{house['nearest_bus_stop']} м" if house.get("nearest_bus_stop") else "—")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 st.subheader("Шаг 2. Характеристики квартиры")
 with st.form("valuation"):
@@ -226,10 +317,18 @@ if submitted:
 result = st.session_state.result
 if result:
     st.subheader("Результат оценки")
-    left, right = st.columns([2, 1])
-    left.metric("Рыночная стоимость", format_price(result["price"]))
-    left.caption(f"Диапазон: {format_price(result['ci_low'])} — {format_price(result['ci_high'])}")
-    right.metric("Учтено аналогов", result["n_analogues_used"])
+    price_col, count_col = st.columns([2, 1])
+    price_col.markdown(
+        f"""
+        <div class="price-card">
+            <div class="price-label">Рыночная стоимость</div>
+            <div class="price-value">{format_price(result['price'])}</div>
+            <div class="price-range">Диапазон: {format_price(result['ci_low'])} — {format_price(result['ci_high'])}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    count_col.metric("Учтено аналогов", result["n_analogues_used"])
 
     st.markdown("**Поправки к рыночной стоимости**")
     st.caption(
