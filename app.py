@@ -252,7 +252,7 @@ def load_house() -> None:
         st.session_state.house_message = "Введите адрес дома."
         return
 
-    matches = house_service.suggest_addresses(typed, limit=7)
+    matches = house_service.local_db.ranked_addresses(typed, limit=7)
     if not matches:
         st.session_state.address = typed
         apply_house(typed)
@@ -304,7 +304,7 @@ st.markdown(
 )
 
 st.subheader("Шаг 1. Адрес дома")
-st.caption("Начните вводить адрес — ниже появятся дома из базы.")
+st.caption("Начните вводить адрес. Если дома нет в базе, подсказка берётся с карты OpenStreetMap.")
 address_event = ADDRESS_BOX(
     value=st.session_state.get("address_query", ""),
     catalog=ADDRESS_CATALOG,

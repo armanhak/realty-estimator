@@ -58,6 +58,12 @@ addressInput.addEventListener("input", (event) => {
                 suggestionsBox.classList.add("hidden");
                 return;
             }
+            if (data.source === "map") {
+                const hint = document.createElement("div");
+                hint.className = "suggestion-source";
+                hint.textContent = "В базе нет. Адреса с карты OpenStreetMap";
+                suggestionsBox.appendChild(hint);
+            }
             data.suggestions.forEach((address) => {
                 const item = document.createElement("div");
                 item.className = "suggestion-item";

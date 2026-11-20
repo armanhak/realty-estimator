@@ -137,7 +137,9 @@ async def get_house_info(req: AddressRequest):
 
 @app.get("/api/address-suggest")
 async def suggest_addresses(q: str = ""):
-    return {"suggestions": house_service.suggest_addresses(q, limit=7)}
+    suggestions = house_service.suggest_addresses(q, limit=7)
+    local = house_service.local_db.ranked_addresses(q, limit=1) if q.strip() else []
+    return {"suggestions": suggestions, "source": "database" if local else "map"}
 
 
 @app.post("/api/estimate")

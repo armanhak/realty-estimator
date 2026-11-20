@@ -41,6 +41,7 @@
     .item { padding: 12px 14px; cursor: pointer; border-bottom: 1px solid #f0f3f6; font-size: 14px; }
     .item:hover { background: #f4f7fb; }
     .item:last-child { border-bottom: none; }
+    .source { padding: 8px 14px; font-size: 12px; color: #5c6b7a; background: #f6f8fb; }
   </style>
 </head>
 <body>
@@ -83,12 +84,21 @@
       post("streamlit:setFrameHeight", { height: Math.ceil(document.body.scrollHeight) });
     }
 
-    function showSuggestions(items) {
+    let mapTimer = null;
+    let mapToken = 0;
+
+    function showSuggestions(items, fromMap) {
       box.innerHTML = "";
       if (!items || !items.length) {
         box.style.display = "none";
         resize();
         return;
+      }
+      if (fromMap) {
+        const hint = document.createElement("div");
+        hint.className = "source";
+        hint.textContent = "В базе нет. Адреса с карты OpenStreetMap";
+        box.appendChild(hint);
       }
       items.forEach((address) => {
         const item = document.createElement("div");
@@ -153,7 +163,55 @@
         .map((row) => row.item.address);
     }
 
-    input.addEventListener("input", () => showSuggestions(matches(input.value)));
+    function insideCity(lat, lon) {
+      return lat >= 56.12 && lat <= 56.42 && lon >= 43.50 && lon <= 44.15;
+    }
+
+    async function mapSuggestions(query) {
+      const q = /новгород/i.test(query) ? query : query + ", Нижний Новгород";
+      const response = await fetch(
+        "https://photon.komoot.io/api/?limit=5&lat=56.326&lon=44.006&q=" + encodeURIComponent(q)
+      );
+      const data = await response.json();
+      const labels = [];
+      (data.features || []).forEach((feature) => {
+        const coords = (feature.geometry || {}).coordinates || [];
+        const lon = coords[0];
+        const lat = coords[1];
+        if (!insideCity(lat, lon)) return;
+        const props = feature.properties || {};
+        if (props.osm_key === "place" && ["city", "town", "state", "county"].includes(props.osm_value)) return;
+        const street = props.street || props.name;
+        if (!street) return;
+        const label = [props.city || props.town || "Нижний Новгород", street, props.housenumber].filter(Boolean).join(", ");
+        if (!labels.includes(label)) labels.push(label);
+      });
+      return labels;
+    }
+
+    function refreshSuggestions() {
+      const local = matches(input.value);
+      if (local.length || input.value.trim().length < 5) {
+        clearTimeout(mapTimer);
+        showSuggestions(local, false);
+        return;
+      }
+      const query = input.value.trim();
+      clearTimeout(mapTimer);
+      showSuggestions([], false);
+      const token = ++mapToken;
+      mapTimer = setTimeout(async () => {
+        try {
+          const found = await mapSuggestions(query);
+          if (token !== mapToken || input.value.trim() !== query) return;
+          showSuggestions(found, true);
+        } catch (err) {
+          if (token === mapToken) showSuggestions([], false);
+        }
+      }, 450);
+    }
+
+    input.addEventListener("input", refreshSuggestions);
     loadButton.addEventListener("click", () => send("load", input.value));
 
     window.addEventListener("message", (event) => {

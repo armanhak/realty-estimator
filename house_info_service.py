@@ -234,25 +234,37 @@ class GeocodingService:
 
     def __init__(self, yandex_api_key: Optional[str] = None):
         self.yandex_api_key = yandex_api_key
+        self._suggest_cache: dict = {}
+        self._last_nominatim = 0.0
 
     def geocode(self, address: str) -> Optional[Tuple[float, float, str]]:
         query = address.strip()
         if "новгород" not in query.lower():
             query = f"{query}, Нижний Новгород"
+        wanted = self._house_number(query)
         finders = []
         if self.yandex_api_key:
             finders.append(self._yandex)
         finders.extend([self._nominatim, self._photon])
         for finder in finders:
-            found = finder(query)
+            found = finder(query, wanted)
             if found and self._inside(found[0], found[1]):
                 return found
+        return None
+
+    @staticmethod
+    def _house_number(query: str) -> Optional[str]:
+        """Последнее слово вроде 8, 8В или 27/8. «8 марта» номером дома не считается."""
+        tail = query.split(",")[-1].strip().lower()
+        last = re.split(r"\s+", tail)[-1].strip(".,")
+        if re.fullmatch(r"\d+(?:/\d+)?[а-яa-z]?", last):
+            return last
         return None
 
     def _inside(self, lat: float, lon: float) -> bool:
         return self._SOUTH <= lat <= self._NORTH and self._WEST <= lon <= self._EAST
 
-    def _yandex(self, address: str) -> Optional[Tuple[float, float, str]]:
+    def _yandex(self, address: str, wanted: Optional[str] = None) -> Optional[Tuple[float, float, str]]:
         try:
             import requests
 
@@ -270,7 +282,7 @@ class GeocodingService:
             print(f"[Geocoding] Ошибка Яндекс API: {exc}")
             return None
 
-    def _nominatim(self, address: str) -> Optional[Tuple[float, float, str]]:
+    def _nominatim(self, address: str, wanted: Optional[str] = None) -> Optional[Tuple[float, float, str]]:
         try:
             import requests
 
@@ -279,7 +291,7 @@ class GeocodingService:
                 params={
                     "q": address,
                     "format": "jsonv2",
-                    "limit": 1,
+                    "limit": 5,
                     "countrycodes": "ru",
                     "addressdetails": 1,
                 },
@@ -287,41 +299,152 @@ class GeocodingService:
                 timeout=8,
             )
             response.raise_for_status()
-            rows = response.json()
-            if not rows:
-                return None
-            row = rows[0]
-            parts = row.get("address") or {}
-            street = parts.get("road") or parts.get("pedestrian") or parts.get("street")
-            house = parts.get("house_number")
-            city = parts.get("city") or parts.get("town") or "Нижний Новгород"
-            label = ", ".join(part for part in [city, street, house] if part) or row.get("display_name") or address
-            return float(row["lat"]), float(row["lon"]), label
+            fallback = None
+            for row in response.json():
+                lat, lon = float(row["lat"]), float(row["lon"])
+                if not self._inside(lat, lon):
+                    continue
+                parts = row.get("address") or {}
+                street = parts.get("road") or parts.get("pedestrian") or parts.get("street")
+                house = parts.get("house_number")
+                city = parts.get("city") or parts.get("town") or "Нижний Новгород"
+                label = ", ".join(part for part in [city, street, house] if part) or row.get("display_name") or address
+                found = (lat, lon, label)
+                number = self._house_number(str(house or ""))
+                if wanted and number == wanted:
+                    return found
+                if fallback is None and not wanted:
+                    fallback = found
+            return fallback
         except Exception as exc:
             print(f"[Geocoding] Ошибка Nominatim: {exc}")
             return None
 
-    def _photon(self, address: str) -> Optional[Tuple[float, float, str]]:
+    def suggest(self, address: str, limit: int = 5) -> List[str]:
+        """Подсказки с карты, если дома нет в локальной базе."""
+        import time
+
+        query = address.strip()
+        if len(query) < 5:
+            return []
+        if "новгород" not in query.lower():
+            query = f"{query}, Нижний Новгород"
+        cached = self._suggest_cache.get(query)
+        now = time.monotonic()
+        if cached and now - cached[0] < 120:
+            return cached[1][:limit]
+        # У Nominatim лимит около одного запроса в секунду. Частые подсказки идут в Photon.
+        if now - self._last_nominatim >= 1.1:
+            self._last_nominatim = now
+            labels = self._suggest_nominatim(query, limit)
+        else:
+            labels = []
+        if not labels:
+            labels = self._suggest_photon(query, limit)
+        labels = labels[:limit]
+        self._suggest_cache[query] = (now, labels)
+        return labels
+
+    def _suggest_nominatim(self, address: str, limit: int) -> List[str]:
+        try:
+            import requests
+
+            response = requests.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={
+                    "q": address,
+                    "format": "jsonv2",
+                    "limit": limit,
+                    "countrycodes": "ru",
+                    "addressdetails": 1,
+                },
+                headers={"User-Agent": "realty-estimator/1.0 (nizhny apartment valuation)", "Accept-Language": "ru"},
+                timeout=8,
+            )
+            response.raise_for_status()
+            labels = []
+            for row in response.json():
+                lat, lon = float(row["lat"]), float(row["lon"])
+                if not self._inside(lat, lon):
+                    continue
+                found = self._nominatim_label(row)
+                if found and found not in labels:
+                    labels.append(found)
+            return labels
+        except Exception as exc:
+            print(f"[Geocoding] Ошибка подсказок Nominatim: {exc}")
+            return []
+
+    @staticmethod
+    def _nominatim_label(row: dict) -> Optional[str]:
+        parts = row.get("address") or {}
+        street = parts.get("road") or parts.get("pedestrian") or parts.get("residential")
+        house = parts.get("house_number")
+        if not street:
+            return None
+        city = parts.get("city") or parts.get("town") or "Нижний Новгород"
+        return ", ".join(part for part in [city, street, house] if part)
+
+    def _suggest_photon(self, address: str, limit: int) -> List[str]:
         try:
             import requests
 
             response = requests.get(
                 "https://photon.komoot.io/api/",
-                params={"q": address, "limit": 1, "lat": 56.326, "lon": 44.006},
+                params={"q": address, "limit": limit, "lat": 56.326, "lon": 44.006},
                 headers={"User-Agent": "realty-estimator/1.0 (nizhny apartment valuation)"},
                 timeout=8,
             )
             response.raise_for_status()
-            features = response.json().get("features") or []
-            if not features:
-                return None
-            feature = features[0]
-            lon, lat = feature["geometry"]["coordinates"][:2]
-            props = feature.get("properties") or {}
-            name = ", ".join(
-                part for part in [props.get("name"), props.get("street"), props.get("city")] if part
+            labels = []
+            for feature in response.json().get("features") or []:
+                lon, lat = feature["geometry"]["coordinates"][:2]
+                if not self._inside(float(lat), float(lon)):
+                    continue
+                found = self._photon_label(feature.get("properties") or {})
+                if found and found not in labels:
+                    labels.append(found)
+            return labels
+        except Exception as exc:
+            print(f"[Geocoding] Ошибка подсказок Photon: {exc}")
+            return []
+
+    @staticmethod
+    def _photon_label(props: dict) -> Optional[str]:
+        if props.get("osm_key") == "place" and props.get("osm_value") in {"city", "town", "state", "county"}:
+            return None
+        street = props.get("street") or props.get("name")
+        house = props.get("housenumber")
+        if not street:
+            return None
+        city = props.get("city") or props.get("town") or "Нижний Новгород"
+        return ", ".join(part for part in [city, street, house] if part)
+
+    def _photon(self, address: str, wanted: Optional[str] = None) -> Optional[Tuple[float, float, str]]:
+        try:
+            import requests
+
+            response = requests.get(
+                "https://photon.komoot.io/api/",
+                params={"q": address, "limit": 5, "lat": 56.326, "lon": 44.006},
+                headers={"User-Agent": "realty-estimator/1.0 (nizhny apartment valuation)"},
+                timeout=8,
             )
-            return float(lat), float(lon), name or address
+            response.raise_for_status()
+            fallback = None
+            for feature in response.json().get("features") or []:
+                lon, lat = feature["geometry"]["coordinates"][:2]
+                if not self._inside(float(lat), float(lon)):
+                    continue
+                props = feature.get("properties") or {}
+                label = self._photon_label(props) or address
+                found = (float(lat), float(lon), label)
+                number = self._house_number(str(props.get("housenumber") or ""))
+                if wanted and number == wanted:
+                    return found
+                if fallback is None and not wanted:
+                    fallback = found
+            return fallback
         except Exception as exc:
             print(f"[Geocoding] Ошибка Photon: {exc}")
             return None
@@ -409,7 +532,10 @@ class HouseInfoService:
     def get_house_info(self, address: str, use_poi: bool = False) -> HouseInfo:
         cached = self._get_from_cache(address)
         if cached and cached.source != "not_found":
-            return cached
+            requested = GeocodingService._house_number(address)
+            same_house = requested == GeocodingService._house_number(cached.address)
+            if cached.source != "geocoder" or same_house or not requested:
+                return cached
 
         house_info = self.local_db.get_house_info(address) or HouseInfo(
             address=address,
@@ -445,9 +571,12 @@ class HouseInfoService:
         return house_info
 
     def suggest_addresses(self, query: str, limit: int = 7) -> List[str]:
-        if self.local_db.df is None:
-            return []
-        return self.local_db.ranked_addresses(query, limit=limit)
+        local = []
+        if self.local_db.df is not None:
+            local = self.local_db.ranked_addresses(query, limit=limit)
+        if local or len((query or "").strip()) < 5:
+            return local
+        return self.geocoder.suggest(query, limit=limit)
 
     def _get_from_cache(self, address: str) -> Optional[HouseInfo]:
         if not self.cache_db:
