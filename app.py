@@ -1,7 +1,6 @@
 import html
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -99,6 +98,36 @@ st.markdown(
         letter-spacing: 0.04em;
     }
     .house-card .info-value { font-size: 16px; font-weight: 700; margin-top: 4px; }
+    .adjustments-table, .analogues-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    .adjustments-table th, .adjustments-table td,
+    .analogues-table th, .analogues-table td {
+        padding: 10px;
+        text-align: left;
+        border-bottom: 1px solid #e8edf2;
+        font-size: 14px;
+        color: #243044;
+    }
+    .adjustments-table thead th, .analogues-table thead th {
+        background: #1f4e79;
+        color: #ffffff;
+        border: none;
+    }
+    .money-cell, .pct-cell { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .money-cell.positive, .pct-cell.positive { color: #1f7a45; }
+    .money-cell.negative, .pct-cell.negative { color: #b42318; }
+    .direction-badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: 700; }
+    .direction-badge.positive { background: #e5f6ec; color: #146c36; }
+    .direction-badge.negative { background: #fde8e6; color: #912018; }
+    .total-row { background: #f6f8fb; font-weight: 700; }
+    .price-figure { color: #1f4e79; font-weight: 700; }
+    .similarity-badge { display: inline-block; padding: 3px 8px; border-radius: 12px; background: #1f4e79; color: #fff; font-size: 12px; font-weight: 700; }
+    .factor-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .factor-name { flex: 0 0 220px; font-size: 14px; color: #243044; }
+    .factor-bar-container { flex: 1; height: 26px; background: #eef2f6; border-radius: 12px; overflow: hidden; }
+    .factor-bar { height: 100%; min-width: 88px; border-radius: 12px; display: flex; align-items: center; padding: 0 10px; color: #fff; font-size: 12px; font-weight: 700; }
+    .factor-bar.positive { background: #1f7a45; }
+    .factor-bar.negative { background: #b42318; }
+    .table-footnote { margin-top: 12px; padding: 12px 14px; background: #fff8e8; border-left: 4px solid #e0a100; border-radius: 6px; font-size: 13px; color: #243044; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -129,6 +158,13 @@ def load_services():
 
 dp, model, house_service = load_services()
 stats = dp.get_stats()
+ADDRESS_CATALOG = [
+    {
+        "address": str(house_service.local_db.df.iloc[indices[0]]["Адрес"]),
+        "key": key,
+    }
+    for key, indices in house_service.local_db.address_index.items()
+]
 
 DEFAULTS = {
     "address": "",
@@ -251,13 +287,9 @@ st.markdown(
 
 st.subheader("Шаг 1. Адрес дома")
 st.caption("Начните вводить адрес — ниже появятся дома из базы.")
-query = (st.session_state.get("address_query") or "").strip()
-suggestions = house_service.suggest_addresses(query, limit=7) if len(query) >= 3 else []
-loaded_address = (st.session_state.house or {}).get("address")
-visible_suggestions = [] if loaded_address and query == loaded_address else suggestions
 address_event = ADDRESS_BOX(
     value=st.session_state.get("address_query", ""),
-    suggestions=visible_suggestions,
+    catalog=ADDRESS_CATALOG,
     key="address_box",
     default=None,
 )
@@ -265,10 +297,7 @@ if isinstance(address_event, dict) and address_event.get("seq") != st.session_st
     st.session_state.address_event_seq = address_event.get("seq")
     typed = (address_event.get("value") or "").strip()
     kind = address_event.get("type")
-    if kind == "input":
-        st.session_state.address_query = typed
-        st.rerun()
-    elif kind == "pick" and typed:
+    if kind == "pick" and typed:
         st.session_state.address_query = typed
         st.session_state.address = typed
         apply_house(typed)
@@ -351,49 +380,82 @@ if result:
     )
     count_col.metric("Учтено аналогов", result["n_analogues_used"])
 
-    st.markdown("**Поправки к рыночной стоимости**")
-    st.caption(
-        f"Базовая стоимость при средних характеристиках: {format_price(result['base_price'])}. "
-        "Каждая строка показывает влияние параметра отдельно. Итог — разница между оценкой и базой."
-    )
+    total_adj = result["price"] - result["base_price"]
+    total_pct = (total_adj / result["base_price"] * 100) if result["base_price"] else 0
+    total_dir = "positive" if total_adj >= 0 else "negative"
     adjustment_rows = []
     for index, item in enumerate(result["adjustments"], start=1):
+        direction = "positive" if item["money_adj"] >= 0 else "negative"
         adjustment_rows.append(
-            {
-                "№": index,
-                "Параметр": item["label"],
-                "У объекта": item["object_value"],
-                "Поправка, ₽": format_signed_price(item["money_adj"]),
-                "Поправка, %": f"{item['pct_adj']:+.1f}%",
-                "Влияние": "Повышает" if item["money_adj"] >= 0 else "Снижает",
-            }
+            "<tr>"
+            f"<td>{index}</td>"
+            f"<td>{html.escape(str(item['label']))}</td>"
+            f"<td>{html.escape(str(item['object_value']))}</td>"
+            f"<td class='money-cell {direction}'>{format_signed_price(item['money_adj'])}</td>"
+            f"<td class='pct-cell {direction}'>{item['pct_adj']:+.1f}%</td>"
+            f"<td><span class='direction-badge {direction}'>"
+            f"{'Повышает' if item['money_adj'] >= 0 else 'Снижает'}</span></td>"
+            "</tr>"
         )
-    st.dataframe(pd.DataFrame(adjustment_rows), use_container_width=True, hide_index=True)
-
-    chart = pd.DataFrame(
-        {
-            "Параметр": [item["label"] for item in result["adjustments"][:8]],
-            "Поправка, тыс. ₽": [item["money_adj"] / 1000 for item in result["adjustments"][:8]],
-        }
-    ).set_index("Параметр")
-    st.bar_chart(chart)
+    adjustment_rows.append(
+        "<tr class='total-row'>"
+        "<td colspan='3' style='text-align:right'>Итог относительно базовой стоимости</td>"
+        f"<td class='money-cell {total_dir}'>{format_signed_price(total_adj)}</td>"
+        f"<td class='pct-cell {total_dir}'>{total_pct:+.1f}%</td>"
+        "<td></td></tr>"
+    )
+    max_impact = max((abs(item["money_adj"]) for item in result["adjustments"][:8]), default=1) or 1
+    bars = []
+    for item in result["adjustments"][:8]:
+        direction = "positive" if item["money_adj"] >= 0 else "negative"
+        width = max(8, abs(item["money_adj"]) / max_impact * 100)
+        bars.append(
+            "<div class='factor-row'>"
+            f"<div class='factor-name'>{html.escape(str(item['label']))}</div>"
+            "<div class='factor-bar-container'>"
+            f"<div class='factor-bar {direction}' style='width:{width:.0f}%'>"
+            f"{format_signed_price(item['money_adj'])}</div></div></div>"
+        )
+    st.markdown("**Поправки к рыночной стоимости**")
+    st.markdown(
+        "<table class='adjustments-table'><thead><tr>"
+        "<th>№</th><th>Параметр</th><th>У объекта</th>"
+        "<th>Поправка, ₽</th><th>Поправка, %</th><th>Влияние</th>"
+        "</tr></thead><tbody>"
+        + "".join(adjustment_rows)
+        + "</tbody></table>"
+        "<div class='table-footnote'>Поправки показаны по отдельности относительно средней квартиры. "
+        "Они не складываются в одну сумму: параметры влияют на цену совместно. "
+        "Итоговая строка — разница между оценкой и базовой стоимостью.</div>"
+        + "".join(bars),
+        unsafe_allow_html=True,
+    )
 
     st.markdown("**Ближайшие аналоги из базы**")
-    analogue_rows = [
-        {
-            "Адрес": item["address"],
-            "Площадь, м²": item["area"],
-            "Комнаты": item["rooms"],
-            "Этаж": item["floor"],
-            "Материал": item["material"],
-            "Год": item["year"],
-            "Ремонт": item["repair"],
-            "Цена": format_price(item["price"]),
-            "Сходство": f"{item['similarity']}%",
-        }
-        for item in result["analogues"]
-    ]
-    st.dataframe(pd.DataFrame(analogue_rows), use_container_width=True, hide_index=True)
+    analogue_rows = []
+    for item in result["analogues"]:
+        analogue_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(item['address']))}</td>"
+            f"<td>{item['area']}</td>"
+            f"<td>{html.escape(str(item['rooms']))}</td>"
+            f"<td>{html.escape(str(item['floor']))}</td>"
+            f"<td>{html.escape(str(item['material']))}</td>"
+            f"<td>{html.escape(str(item['year']))}</td>"
+            f"<td>{html.escape(str(item['repair']))}</td>"
+            f"<td class='price-figure'>{format_price(item['price'])}</td>"
+            f"<td><span class='similarity-badge'>{item['similarity']}%</span></td>"
+            "</tr>"
+        )
+    st.markdown(
+        "<table class='analogues-table'><thead><tr>"
+        "<th>Адрес</th><th>Площадь, м²</th><th>Комнаты</th><th>Этаж</th>"
+        "<th>Материал</th><th>Год</th><th>Ремонт</th><th>Цена</th><th>Сходство</th>"
+        "</tr></thead><tbody>"
+        + "".join(analogue_rows)
+        + "</tbody></table>",
+        unsafe_allow_html=True,
+    )
 
     with st.expander("Как считается оценка"):
         st.markdown(

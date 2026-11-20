@@ -54,8 +54,13 @@
     const input = document.getElementById("address");
     const box = document.getElementById("suggestions");
     const loadButton = document.getElementById("load");
+    const GENERIC = new Set([
+      "улица", "проспект", "переулок", "бульвар", "шоссе", "площадь",
+      "город", "россия", "нижний", "новгород", "дом", "корпус",
+      "городского", "округа", "жилой", "район",
+    ]);
+    let catalog = [];
     let seq = 0;
-    let timer = null;
     let ready = false;
 
     function post(type, extra) {
@@ -101,21 +106,66 @@
       resize();
     }
 
-    input.addEventListener("input", () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => send("input", input.value), 200);
-    });
+    function normalize(value) {
+      let text = String(value || "").toLowerCase().trim();
+      text = text.replace(/[,.;:]/g, " ").replace(/\s+/g, " ");
+      [
+        ["нижегородская область", ""],
+        ["нижний новгород", ""],
+        ["россия", ""],
+        ["г.", ""],
+        ["д.", ""],
+        ["ул.", "улица"],
+        ["пр-т", "проспект"],
+        ["пр.", "проспект"],
+      ].forEach(([src, dst]) => { text = text.split(src).join(dst); });
+      return text.replace(/\s+/g, " ").replace(/^[ ,]+|[ ,]+$/g, "");
+    }
+
+    function matchScore(queryNorm, addrKey) {
+      const queryTokens = queryNorm.split(" ").filter((token) => token && !GENERIC.has(token));
+      if (!queryTokens.length) return 0;
+      const addrTokens = String(addrKey || "").split(" ");
+      const addrSet = new Set(addrTokens);
+      let total = 0;
+      for (const token of queryTokens) {
+        if (/\d/.test(token)) {
+          if (!addrSet.has(token)) return 0;
+          total += 50;
+          continue;
+        }
+        if (addrSet.has(token)) { total += 20; continue; }
+        if (token.length >= 3 && addrTokens.some((item) => item.startsWith(token))) { total += 8; continue; }
+        return 0;
+      }
+      if (queryNorm === addrKey) total += 100;
+      return total;
+    }
+
+    function matches(value) {
+      const queryNorm = normalize(value);
+      if (queryNorm.length < 3) return [];
+      return catalog
+        .map((item) => ({ item, score: matchScore(queryNorm, item.key) }))
+        .filter((row) => row.score > 0)
+        .sort((a, b) => b.score - a.score || a.item.address.localeCompare(b.item.address, "ru"))
+        .slice(0, 7)
+        .map((row) => row.item.address);
+    }
+
+    input.addEventListener("input", () => showSuggestions(matches(input.value)));
     loadButton.addEventListener("click", () => send("load", input.value));
 
     window.addEventListener("message", (event) => {
       const data = event.data || {};
       if (data.type !== "streamlit:render") return;
       const args = data.args || {};
+      if (Array.isArray(args.catalog) && args.catalog.length) catalog = args.catalog;
       if (!input.dataset.ready) {
         input.value = args.value || "";
         input.dataset.ready = "1";
+        showSuggestions(matches(input.value));
       }
-      showSuggestions(args.suggestions || []);
     });
 
     post("streamlit:componentReady", { apiVersion: 1 });
