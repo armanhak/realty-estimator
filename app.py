@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from data_processor import (
     FLOOR_TYPE_MAP,
@@ -26,19 +27,23 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    [data-testid="stAppViewContainer"] {
-        background: linear-gradient(160deg, #1f3b73 0%, #3d6b8a 45%, #d7e4ea 100%);
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stHeader"],
+    [data-testid="stToolbar"] {
+        background: linear-gradient(160deg, #1f3b73 0%, #3d6b8a 45%, #d7e4ea 100%) !important;
         color: #243044;
     }
-    [data-testid="stHeader"] { background: transparent; }
-    [data-testid="stToolbar"] { background: transparent; }
+    [data-testid="stHeader"],
+    [data-testid="stToolbar"] { background: transparent !important; }
     .block-container {
         max-width: 1100px;
-        background: #ffffff;
+        background: #ffffff !important;
         border-radius: 16px;
         padding: 2rem 2.2rem 2.4rem;
         box-shadow: 0 10px 30px rgba(20, 35, 60, 0.12);
     }
+    iframe { border: none !important; background: transparent !important; }
     .subtitle { color: #5c6b7a; font-size: 16px; margin: 0 0 6px; text-align: center; }
     .method { color: #7b8794; font-size: 14px; text-align: center; margin-bottom: 8px; }
     .page-title { text-align: center; font-size: 28px; margin: 0 0 8px; }
@@ -47,16 +52,17 @@ st.markdown(
         border-radius: 8px !important;
         background: #ffffff !important;
     }
-    .stFormSubmitButton button {
+    .stFormSubmitButton button,
+    .stButton > button {
         background: #1f4e79 !important;
         color: #ffffff !important;
         border: none !important;
         border-radius: 10px !important;
         font-weight: 600 !important;
-        width: 100%;
-        padding: 0.7rem 1rem !important;
     }
-    .stFormSubmitButton button:hover { background: #173e61 !important; color: #ffffff !important; }
+    .stFormSubmitButton button { width: 100%; padding: 0.7rem 1rem !important; }
+    .stFormSubmitButton button:hover,
+    .stButton > button:hover { background: #173e61 !important; color: #ffffff !important; }
     div[data-testid="stMetric"] {
         background: #f6f8fb;
         border-radius: 12px;
@@ -99,6 +105,10 @@ st.markdown(
 )
 
 DATA_PATH = Path(__file__).resolve().parent / "data" / "apartments.xlsx"
+ADDRESS_BOX = components.declare_component(
+    "address_box",
+    path=str(Path(__file__).resolve().parent / "components" / "address_box"),
+)
 ROOM_LABELS = {0: "Студия", 1: "1", 2: "2", 3: "3", 4: "4 и более"}
 
 
@@ -205,11 +215,6 @@ def load_house() -> None:
     apply_house(matches[0])
 
 
-def use_suggestion(address: str) -> None:
-    st.session_state.address = address
-    apply_house(address)
-
-
 def estimate_from_form() -> None:
     floor = int(st.session_state.floor)
     total_floors = int(st.session_state.total_floors)
@@ -245,25 +250,32 @@ st.markdown(
 )
 
 st.subheader("Шаг 1. Адрес дома")
-with st.form("house_lookup"):
-    st.text_input(
-        "Адрес",
-        key="address",
-        placeholder="Например: Грузинская улица, 46",
-    )
-    st.form_submit_button("Загрузить характеристики", on_click=load_house)
-
-query = (st.session_state.address or "").strip()
+st.caption("Начните вводить адрес — ниже появятся дома из базы.")
+query = (st.session_state.get("address_query") or "").strip()
 suggestions = house_service.suggest_addresses(query, limit=7) if len(query) >= 3 else []
 loaded_address = (st.session_state.house or {}).get("address")
-show_suggestions = [
-    address for address in suggestions
-    if not (loaded_address and address == loaded_address and len(suggestions) == 1)
-]
-if show_suggestions:
-    st.caption("Подсказки из базы. Нажмите адрес, чтобы подставить этот дом.")
-    for index, address in enumerate(show_suggestions):
-        st.button(address, key=f"suggestion_{index}", on_click=use_suggestion, args=(address,))
+visible_suggestions = [] if loaded_address and query == loaded_address else suggestions
+address_event = ADDRESS_BOX(
+    value=st.session_state.get("address_query", ""),
+    suggestions=visible_suggestions,
+    key="address_box",
+    default=None,
+)
+if isinstance(address_event, dict) and address_event.get("seq") != st.session_state.get("address_event_seq"):
+    st.session_state.address_event_seq = address_event.get("seq")
+    typed = (address_event.get("value") or "").strip()
+    kind = address_event.get("type")
+    if kind == "input":
+        st.session_state.address_query = typed
+        st.rerun()
+    elif kind == "pick" and typed:
+        st.session_state.address_query = typed
+        st.session_state.address = typed
+        apply_house(typed)
+    elif kind == "load":
+        st.session_state.address_query = typed
+        st.session_state.address = typed
+        load_house()
 
 if st.session_state.house_message:
     st.warning(st.session_state.house_message)

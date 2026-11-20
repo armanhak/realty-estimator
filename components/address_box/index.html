@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #243044; }
+    label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 14px; }
+    .row { display: flex; gap: 10px; }
+    input {
+      flex: 1;
+      width: 100%;
+      padding: 10px 12px;
+      border: 2px solid #e0e6ed;
+      border-radius: 8px;
+      font-size: 15px;
+      background: #fff;
+      color: #243044;
+    }
+    input:focus { outline: none; border-color: #2f5f8a; }
+    button {
+      background: #1f4e79;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 15px;
+      padding: 12px 18px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    button:hover { background: #173e61; }
+    .suggestions {
+      display: none;
+      background: #fff;
+      border: 1px solid #e0e6ed;
+      border-radius: 10px;
+      margin-top: 8px;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .item { padding: 12px 14px; cursor: pointer; border-bottom: 1px solid #f0f3f6; font-size: 14px; }
+    .item:hover { background: #f4f7fb; }
+    .item:last-child { border-bottom: none; }
+  </style>
+</head>
+<body>
+  <label for="address">Адрес</label>
+  <div class="row">
+    <input id="address" type="text" placeholder="Например: Грузинская улица, 46" autocomplete="off" />
+    <button id="load" type="button">Загрузить характеристики</button>
+  </div>
+  <div id="suggestions" class="suggestions"></div>
+  <script>
+    const input = document.getElementById("address");
+    const box = document.getElementById("suggestions");
+    const loadButton = document.getElementById("load");
+    let seq = 0;
+    let timer = null;
+    let ready = false;
+
+    function post(type, extra) {
+      window.parent.postMessage(Object.assign({
+        isStreamlitMessage: true,
+        type: type,
+      }, extra), "*");
+    }
+
+    function send(kind, value) {
+      seq += 1;
+      post("streamlit:setComponentValue", {
+        value: { type: kind, value: value, seq: seq },
+        dataType: "json",
+      });
+    }
+
+    function resize() {
+      if (!ready) return;
+      post("streamlit:setFrameHeight", { height: Math.ceil(document.body.scrollHeight) });
+    }
+
+    function showSuggestions(items) {
+      box.innerHTML = "";
+      if (!items || !items.length) {
+        box.style.display = "none";
+        resize();
+        return;
+      }
+      items.forEach((address) => {
+        const item = document.createElement("div");
+        item.className = "item";
+        item.textContent = address;
+        item.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          input.value = address;
+          showSuggestions([]);
+          send("pick", address);
+        });
+        box.appendChild(item);
+      });
+      box.style.display = "block";
+      resize();
+    }
+
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => send("input", input.value), 200);
+    });
+    loadButton.addEventListener("click", () => send("load", input.value));
+
+    window.addEventListener("message", (event) => {
+      const data = event.data || {};
+      if (data.type !== "streamlit:render") return;
+      const args = data.args || {};
+      if (!input.dataset.ready) {
+        input.value = args.value || "";
+        input.dataset.ready = "1";
+      }
+      showSuggestions(args.suggestions || []);
+    });
+
+    post("streamlit:componentReady", { apiVersion: 1 });
+    ready = true;
+    resize();
+  </script>
+</body>
+</html>
