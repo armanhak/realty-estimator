@@ -1,0 +1,319 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(160deg, #1f3b73 0%, #3d6b8a 45%, #d7e4ea 100%);
+    min-height: 100vh;
+    color: #243044;
+    padding: 20px;
+}
+
+.container { max-width: 1100px; margin: 0 auto; }
+
+header, section, footer {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(20, 35, 60, 0.12);
+}
+
+header {
+    padding: 28px 30px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+header h1 { font-size: 28px; margin-bottom: 8px; }
+.subtitle { color: #5c6b7a; font-size: 16px; margin-bottom: 6px; }
+.method { color: #7b8794; font-size: 14px; }
+
+section { padding: 28px 30px; margin-bottom: 20px; }
+section h2 { margin-bottom: 8px; font-size: 22px; }
+section h3 { margin: 8px 0 12px; font-size: 18px; }
+.section-hint, .section-description { color: #5c6b7a; font-size: 14px; line-height: 1.5; margin-bottom: 16px; }
+
+.grid-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-bottom: 18px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.form-group input, .form-group select, .address-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 2px solid #e0e6ed;
+    border-radius: 8px;
+    font-size: 15px;
+    background: #fff;
+}
+
+.form-group input:focus, .form-group select:focus, .address-input:focus {
+    outline: none;
+    border-color: #2f5f8a;
+}
+
+.btn-primary, .btn-fetch {
+    background: #1f4e79;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.btn-primary {
+    width: 100%;
+    padding: 14px 24px;
+    font-size: 17px;
+}
+
+.btn-fetch {
+    padding: 12px 18px;
+    font-size: 15px;
+    white-space: nowrap;
+}
+
+.btn-primary:hover, .btn-fetch:hover:not(:disabled) { background: #173e61; }
+.btn-primary:disabled, .btn-fetch:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.hidden { display: none; }
+
+.address-input-wrapper { display: flex; gap: 10px; margin-bottom: 8px; }
+.address-input { flex: 1; }
+
+.suggestions-dropdown {
+    background: #fff;
+    border: 1px solid #e0e6ed;
+    border-radius: 10px;
+    margin-bottom: 12px;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.suggestion-item {
+    padding: 12px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f3f6;
+    font-size: 14px;
+}
+
+.suggestion-item:hover { background: #f4f7fb; }
+.suggestion-item:last-child { border-bottom: none; }
+
+.house-info-block {
+    margin-top: 16px;
+    padding: 18px;
+    background: #f6f8fb;
+    border-radius: 12px;
+    border-left: 4px solid #1f4e79;
+}
+
+.house-info-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.source-badge {
+    padding: 6px 10px;
+    background: #1f4e79;
+    color: #fff;
+    border-radius: 20px;
+    font-size: 12px;
+}
+
+.house-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.house-info-block .info-card {
+    background: #fff;
+    padding: 12px;
+    border-radius: 10px;
+    text-align: center;
+}
+
+.house-info-block .info-label {
+    font-size: 12px;
+    color: #7b8794;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+}
+
+.house-info-block .info-value { font-size: 16px; font-weight: 700; }
+
+.house-address {
+    margin-top: 12px;
+    padding: 12px;
+    background: #fff;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.result-main {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+    margin: 16px 0 8px;
+}
+
+.price-card {
+    background: #1f6b4a;
+    color: #fff;
+    padding: 28px;
+    border-radius: 12px;
+    text-align: center;
+}
+
+.price-label { font-size: 14px; opacity: 0.9; margin-bottom: 8px; }
+.price-value { font-size: 36px; font-weight: 700; margin-bottom: 8px; }
+.price-range { font-size: 15px; }
+
+.stat-card {
+    background: #f6f8fb;
+    padding: 28px;
+    border-radius: 12px;
+    text-align: center;
+    border-left: 4px solid #1f4e79;
+}
+
+.stat-label { font-size: 14px; color: #7b8794; margin-bottom: 8px; }
+.stat-value { font-size: 36px; font-weight: 700; color: #1f4e79; }
+.stat-sub { font-size: 13px; color: #7b8794; }
+
+.details-block { margin-top: 22px; }
+
+.adjustments-summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 18px;
+    padding: 18px;
+    background: #f6f8fb;
+    border-radius: 12px;
+}
+
+.summary-item {
+    text-align: center;
+    padding: 14px 20px;
+    background: #fff;
+    border-radius: 10px;
+    min-width: 200px;
+}
+
+.summary-item.final { background: #1f6b4a; color: #fff; }
+.summary-item.final .summary-label,
+.summary-item.final .summary-hint { color: rgba(255, 255, 255, 0.9); }
+.summary-label { font-size: 12px; color: #7b8794; margin-bottom: 6px; text-transform: uppercase; }
+.summary-value { font-size: 24px; font-weight: 700; }
+.summary-item.final .summary-value { color: #fff; }
+.summary-hint { font-size: 12px; color: #7b8794; margin-top: 4px; }
+.summary-arrow { font-size: 28px; color: #1f4e79; }
+
+table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+th, td { padding: 10px; text-align: left; border-bottom: 1px solid #e8edf2; font-size: 14px; vertical-align: top; }
+th { background: #f6f8fb; font-weight: 600; }
+
+.adjustments-table thead th { background: #1f4e79; color: #fff; border: none; }
+.money-cell, .pct-cell { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+.money-cell.positive, .pct-cell.positive { color: #1f7a45; }
+.money-cell.negative, .pct-cell.negative { color: #b42318; }
+.direction-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+}
+.direction-badge.positive { background: #e5f6ec; color: #146c36; }
+.direction-badge.negative { background: #fde8e6; color: #912018; }
+.total-row { background: #f6f8fb; font-weight: 700; }
+.total-label { text-align: right; }
+.table-footnote {
+    margin-top: 12px;
+    padding: 12px 14px;
+    background: #fff8e8;
+    border-left: 4px solid #e0a100;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.factor-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.factor-name { flex: 0 0 220px; font-size: 14px; }
+.factor-bar-container { flex: 1; height: 26px; background: #eef2f6; border-radius: 12px; overflow: hidden; }
+.factor-bar {
+    height: 100%;
+    min-width: 88px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+}
+.factor-bar.positive { background: #1f7a45; }
+.factor-bar.negative { background: #b42318; }
+
+.similarity-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background: #1f4e79;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.method-explanation {
+    background: #f6f8fb;
+    padding: 16px 18px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.6;
+}
+.method-explanation ol { margin: 10px 0 0 18px; }
+.method-explanation li { margin-bottom: 6px; }
+
+footer {
+    padding: 18px;
+    text-align: center;
+    font-size: 13px;
+    color: #5c6b7a;
+}
+footer p { margin-bottom: 4px; }
+
+.notification {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    color: #fff;
+    font-weight: 600;
+    z-index: 20;
+}
+.notification-success { background: #1f6b4a; }
+.notification-error { background: #b42318; }
+
+@media (max-width: 768px) {
+    .result-main, .address-input-wrapper, .adjustments-summary, .house-info-header { display: block; }
+    .summary-item, .btn-fetch { width: 100%; margin-top: 10px; }
+    .factor-name { flex-basis: 120px; font-size: 12px; }
+    header h1 { font-size: 22px; }
+    .price-value, .stat-value { font-size: 28px; }
+}
