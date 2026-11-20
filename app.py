@@ -194,6 +194,14 @@ def format_price(price: float) -> str:
     return f"{int(round(price)):,}".replace(",", " ") + " ₽"
 
 
+def format_distance(meters) -> str:
+    if meters is None:
+        return "—"
+    if meters < 1000:
+        return f"{int(round(meters))} м"
+    return f"{meters / 1000:.1f} км".replace(".", ",")
+
+
 def format_signed_price(price: float) -> str:
     sign = "+" if price >= 0 else "−"
     return sign + " " + f"{int(round(abs(price))):,}".replace(",", " ") + " ₽"
@@ -273,14 +281,19 @@ def estimate_from_form() -> None:
         "year": int(st.session_state.year),
         "zone": ZONE_MAP.get(st.session_state.zone, 3),
     }
-    st.session_state.result = model.estimate(features)
+    house = st.session_state.house or {}
+    st.session_state.result = model.estimate(
+        features,
+        latitude=house.get("latitude"),
+        longitude=house.get("longitude"),
+    )
 
 
 st.markdown(
     f"""
     <h1 class="page-title">Оценка рыночной стоимости квартиры</h1>
     <p class="subtitle">Нижний Новгород · база из {stats['n_objects']} объектов · цены от {format_price(stats['price_min'])} до {format_price(stats['price_max'])}</p>
-    <p class="method">Похожие квартиры влияют на цену сильнее, чем объекты с другими характеристиками.</p>
+    <p class="method">Похожие и близкие по карте квартиры влияют на цену сильнее, чем дальние объекты с другими характеристиками.</p>
     """,
     unsafe_allow_html=True,
 )
@@ -330,6 +343,12 @@ if house:
         + _card("До центра", f"{house['dist_to_center']} м" if house.get("dist_to_center") else "—")
         + _card("До метро", f"{house['nearest_metro']} м" if house.get("nearest_metro") else "—")
         + _card("До остановки", f"{house['nearest_bus_stop']} м" if house.get("nearest_bus_stop") else "—")
+        + _card(
+            "Координаты",
+            f"{float(house['latitude']):.5f}, {float(house['longitude']):.5f}"
+            if house.get("latitude") and house.get("longitude")
+            else "—",
+        )
         + "</div>",
         unsafe_allow_html=True,
     )
@@ -431,7 +450,12 @@ if result:
         unsafe_allow_html=True,
     )
 
-    st.markdown("**Ближайшие аналоги из базы**")
+    distance_note = (
+        "Рядом с домом объекты получают больший вес. На расстоянии 1,5 км этот вес близости составляет около 60%."
+        if result.get("latitude")
+        else "Адрес с координатами не выбран, поэтому расстояние по карте в весе не участвует."
+    )
+    st.markdown(f"**Ближайшие аналоги из базы**\n\n{distance_note}")
     analogue_rows = []
     for item in result["analogues"]:
         analogue_rows.append(
@@ -443,6 +467,7 @@ if result:
             f"<td>{html.escape(str(item['material']))}</td>"
             f"<td>{html.escape(str(item['year']))}</td>"
             f"<td>{html.escape(str(item['repair']))}</td>"
+            f"<td>{format_distance(item.get('distance_m'))}</td>"
             f"<td class='price-figure'>{format_price(item['price'])}</td>"
             f"<td><span class='similarity-badge'>{item['similarity']}%</span></td>"
             "</tr>"
@@ -450,7 +475,7 @@ if result:
     st.markdown(
         "<table class='analogues-table'><thead><tr>"
         "<th>Адрес</th><th>Площадь, м²</th><th>Комнаты</th><th>Этаж</th>"
-        "<th>Материал</th><th>Год</th><th>Ремонт</th><th>Цена</th><th>Сходство</th>"
+        "<th>Материал</th><th>Год</th><th>Ремонт</th><th>До объекта</th><th>Цена</th><th>Сходство</th>"
         "</tr></thead><tbody>"
         + "".join(analogue_rows)
         + "</tbody></table>",
@@ -461,7 +486,7 @@ if result:
         st.markdown(
             """
 Система сравнивает квартиру с объектами базы по площади, этажу, ремонту, материалу, году и расположению.
-Похожим квартирам даётся больший вес, сильно отличающиеся почти не влияют на цену.
+Если адрес найден, берутся координаты дома и считается расстояние до каждого объекта. Ближний объект получает больший вес: на 1,5 км вес близости составляет около 60%.
 Диапазон — коридор, в котором обычно лежит оценка для квартир с таким набором параметров.
 Оценка нужна для ориентира. Итоговое суждение остаётся за специалистом.
 """

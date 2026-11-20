@@ -21,6 +21,8 @@ FEATURE_LABELS = {
 
 # Площадь, расстояние до центра, остановка, метро, год.
 LOG_FEATURE_INDICES = [0, 9, 10, 11, 12]
+# На этом расстоянии по карте вес близости падает примерно до 60%.
+GEO_BANDWIDTH_M = 1500.0
 
 
 class _FittedModel:
@@ -50,10 +52,37 @@ class LocalWeightedRegressor:
     def _gaussian_weights(self, distances: np.ndarray) -> np.ndarray:
         return np.exp(-(distances ** 2) / (2 * self.bandwidth ** 2))
 
-    def predict(self, X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray):
+    @staticmethod
+    def _geo_weights(origin: tuple, coordinates: np.ndarray) -> tuple:
+        lat1 = np.radians(float(origin[0]))
+        lon1 = np.radians(float(origin[1]))
+        lat2 = np.radians(coordinates[:, 0].astype(float))
+        lon2 = np.radians(coordinates[:, 1].astype(float))
+        valid = np.isfinite(lat2) & np.isfinite(lon2)
+        d_lat = lat2 - lat1
+        d_lon = lon2 - lon1
+        a = np.sin(d_lat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(d_lon / 2) ** 2
+        meters = np.full(len(coordinates), np.inf)
+        meters[valid] = 6_371_000 * 2 * np.arctan2(np.sqrt(a[valid]), np.sqrt(1 - a[valid]))
+        weights = np.exp(-(meters ** 2) / (2 * GEO_BANDWIDTH_M ** 2))
+        weights[~valid] = 0.0
+        return weights, meters
+
+    def predict(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        X_test: np.ndarray,
+        origin: tuple = None,
+        coordinates: np.ndarray = None,
+    ):
         x_row = np.asarray(X_test, dtype=float).reshape(1, -1)
         distances = cdist(x_row, X_train, metric="euclidean")[0]
         weights = self._gaussian_weights(distances)
+        geo_meters = None
+        if origin is not None and coordinates is not None:
+            geo_weights, geo_meters = self._geo_weights(origin, coordinates)
+            weights = weights * geo_weights
 
         # Вес ниже 5% почти не двигает цену, но раздувает число «учтённых» аналогов.
         mask = weights >= 0.05
@@ -82,7 +111,8 @@ class LocalWeightedRegressor:
         fitted = _FittedModel(coef=solution[:-1], intercept=float(solution[-1]))
 
         y_pred_log = float(fitted.predict(x_row)[0])
-        return y_pred_log, indices_local, w_local, fitted, X_local
+        local_meters = None if geo_meters is None else geo_meters[indices_local]
+        return y_pred_log, indices_local, w_local, fitted, X_local, local_meters
 
 
 class ValuationModel:
@@ -155,7 +185,7 @@ class ValuationModel:
     def _reverse_map(value, mapping):
         return mapping.get(int(value), "—")
 
-    def estimate(self, features_dict: dict) -> dict:
+    def estimate(self, features_dict: dict, latitude: float = None, longitude: float = None) -> dict:
         x = np.array(
             [[
                 features_dict["area"],
@@ -181,8 +211,15 @@ class ValuationModel:
             x_log[0, idx] = np.log1p(max(0.0, x_log[0, idx]))
 
         x_scaled = self.dp.scaler.transform(x_log)
-        y_pred_log, indices, weights, fitted, _x_local = self.regressor.predict(
-            self.dp.X_scaled, self.dp.y_log, x_scaled[0]
+        origin = None
+        if latitude is not None and longitude is not None:
+            origin = (float(latitude), float(longitude))
+        y_pred_log, indices, weights, fitted, _x_local, geo_meters = self.regressor.predict(
+            self.dp.X_scaled,
+            self.dp.y_log,
+            x_scaled[0],
+            origin=origin,
+            coordinates=self.dp.coordinates,
         )
         y_pred = float(np.exp(y_pred_log))
 
@@ -200,7 +237,7 @@ class ValuationModel:
         for item in adjustments:
             item["object_value"] = object_values.get(item["feature"], "—")
 
-        analogues = self.dp.get_analogues(indices, weights, top_n=5)
+        analogues = self.dp.get_analogues(indices, weights, top_n=5, distances_m=geo_meters)
         return {
             "price": int(round(y_pred)),
             "base_price": int(round(base_price)),
@@ -209,4 +246,7 @@ class ValuationModel:
             "analogues": analogues,
             "adjustments": adjustments,
             "n_analogues_used": int(len(indices)),
+            "latitude": None if origin is None else origin[0],
+            "longitude": None if origin is None else origin[1],
+            "geo_bandwidth_m": None if origin is None else int(GEO_BANDWIDTH_M),
         }

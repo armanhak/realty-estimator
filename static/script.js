@@ -1,3 +1,9 @@
+function formatDistance(meters) {
+    if (meters === null || meters === undefined) return "—";
+    if (meters < 1000) return `${Math.round(meters)} м`;
+    return `${(meters / 1000).toFixed(1).replace(".", ",")} км`;
+}
+
 function formatPrice(price) {
     return Math.round(price).toLocaleString("ru-RU") + " ₽";
 }
@@ -110,6 +116,10 @@ async function fetchHouseInfo() {
         document.getElementById("info-metro").textContent = data.nearest_metro ? `${data.nearest_metro} м` : "—";
         document.getElementById("info-bus").textContent = data.nearest_bus_stop ? `${data.nearest_bus_stop} м` : "—";
         document.getElementById("info-full-address").textContent = data.address;
+        const coords = data.latitude && data.longitude
+            ? `Координаты: ${Number(data.latitude).toFixed(5)}, ${Number(data.longitude).toFixed(5)}`
+            : "Координаты не найдены";
+        document.getElementById("info-coords").textContent = coords;
         document.getElementById("info-source").textContent = data.confidence === "high" ? "Найдено в базе" : "Похожий адрес";
         document.getElementById("house-info-block").classList.remove("hidden");
 
@@ -287,6 +297,7 @@ function renderAnaloguesTable(result) {
             <td>${item.material}</td>
             <td>${item.year}</td>
             <td>${item.repair}</td>
+            <td>${formatDistance(item.distance_m)}</td>
             <td><strong>${formatPrice(item.price)}</strong></td>
             <td><span class="similarity-badge">${item.similarity}%</span></td>
         </tr>`).join("");
@@ -295,7 +306,7 @@ function renderAnaloguesTable(result) {
             <thead>
                 <tr>
                     <th>Адрес</th><th>Площадь</th><th>Комнаты</th><th>Этаж</th>
-                    <th>Материал</th><th>Год</th><th>Ремонт</th><th>Цена</th><th>Сходство</th>
+                    <th>Материал</th><th>Год</th><th>Ремонт</th><th>До объекта</th><th>Цена</th><th>Сходство</th>
                 </tr>
             </thead>
             <tbody>${rows}</tbody>

@@ -146,7 +146,11 @@ async def estimate(req: ValuationRequest):
         except Exception as exc:
             print(f"[Estimate] Ошибка получения данных о доме: {exc}")
 
-    result = model.estimate(features)
+    latitude = longitude = None
+    if house_info and house_info.confidence != "low" and house_info.latitude and house_info.longitude:
+        latitude = float(house_info.latitude)
+        longitude = float(house_info.longitude)
+    result = model.estimate(features, latitude=latitude, longitude=longitude)
     if house_info and house_info.confidence != "low":
         result["house_info"] = house_info.to_dict()
     return result

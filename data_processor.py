@@ -151,6 +151,7 @@ class DataProcessor:
         self.X, self.y, self.y_log, self.feature_cols = prepare_features(self.df)
         self.scaler = StandardScaler()
         self.X_scaled = self.scaler.fit_transform(self.X.to_numpy(dtype=float))
+        self.coordinates = self.df[["Широта", "Долгота"]].to_numpy(dtype=float)
 
     def get_stats(self):
         return {
@@ -161,8 +162,15 @@ class DataProcessor:
             "area_median": float(self.df["Общая площадь, кв.м"].median()),
         }
 
-    def get_analogues(self, indices, weights, top_n: int = 5):
+    def get_analogues(self, indices, weights, top_n: int = 5, distances_m=None):
         """Топ-N аналогов с наибольшим весом."""
+        distance_by_index = {}
+        if distances_m is not None:
+            distance_by_index = {
+                int(idx): float(meters)
+                for idx, meters in zip(indices, distances_m)
+                if meters is not None and np.isfinite(meters)
+            }
         pairs = sorted(zip(indices, weights), key=lambda item: -float(item[1]))[:top_n]
         max_weight = max((float(w) for _, w in pairs), default=0.001)
         analogues = []
@@ -186,6 +194,11 @@ class DataProcessor:
                     "price": int(row["Цена"]),
                     "weight": float(weight),
                     "similarity": min(100, int(float(weight) * 100 / max(0.001, max_weight))),
+                    "distance_m": (
+                        int(round(distance_by_index[int(idx)]))
+                        if int(idx) in distance_by_index
+                        else None
+                    ),
                 }
             )
         return analogues
