@@ -119,8 +119,9 @@ async def index(request: Request):
 @app.post("/api/house-info")
 async def get_house_info(req: AddressRequest):
     info = house_service.get_house_info(req.address.strip(), use_poi=False)
-    found_in_base = info.source.startswith("local_dataset")
-    found_on_map = info.source == "geocoder" and info.latitude and info.longitude
+    source = info.source or ""
+    found_in_base = source.startswith("local_dataset") or source == "cache"
+    found_on_map = bool(info.latitude and info.longitude) and not found_in_base
     if found_in_base:
         message = "Данные получены из локальной базы"
     elif found_on_map:

@@ -375,11 +375,11 @@ with st.form("valuation"):
     with col2:
         st.selectbox("Состояние ремонта", list(REPAIR_MAP), key="repair")
         st.selectbox("Материал стен", list(MATERIAL_MAP), key="material")
-        st.number_input("Год постройки", min_value=1900, max_value=2026, step=1, key="year")
+        st.number_input("Год постройки", min_value=1700, max_value=2026, step=1, key="year")
         st.number_input("Расстояние до центра, м", min_value=0, max_value=30000, step=1, key="dist_center")
         st.number_input("Ближайшее метро, м", min_value=0, max_value=30000, step=1, key="dist_metro")
     with col3:
-        st.number_input("Ближайшая остановка, м", min_value=0, max_value=5000, step=1, key="dist_stop")
+        st.number_input("Ближайшая остановка, м", min_value=0, max_value=30000, step=1, key="dist_stop")
         st.selectbox("Зона", list(ZONE_MAP), key="zone")
         st.selectbox("Балкон или лоджия", ["Есть", "Нет"], key="balcony")
         st.selectbox("Санузел", ["Раздельный", "Совмещённый"], key="bathroom")

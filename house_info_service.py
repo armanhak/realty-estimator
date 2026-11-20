@@ -408,8 +408,7 @@ class HouseInfoService:
 
     def get_house_info(self, address: str, use_poi: bool = False) -> HouseInfo:
         cached = self._get_from_cache(address)
-        if cached:
-            cached.source = "cache"
+        if cached and cached.source != "not_found":
             return cached
 
         house_info = self.local_db.get_house_info(address) or HouseInfo(
