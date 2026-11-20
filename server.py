@@ -119,11 +119,18 @@ async def index(request: Request):
 @app.post("/api/house-info")
 async def get_house_info(req: AddressRequest):
     info = house_service.get_house_info(req.address.strip(), use_poi=False)
-    found = info.confidence != "low" and info.source != "not_found"
+    found_in_base = info.source.startswith("local_dataset")
+    found_on_map = info.source == "geocoder" and info.latitude and info.longitude
+    if found_in_base:
+        message = "Данные получены из локальной базы"
+    elif found_on_map:
+        message = "Адреса нет в базе. Координаты определены по карте."
+    else:
+        message = "Адрес не найден ни в базе, ни на карте"
     return {
-        "success": found,
+        "success": found_in_base or found_on_map,
         "data": info.to_dict(),
-        "message": "Данные получены из локальной базы" if found else "Адрес не найден в базе",
+        "message": message,
     }
 
 
@@ -147,10 +154,10 @@ async def estimate(req: ValuationRequest):
             print(f"[Estimate] Ошибка получения данных о доме: {exc}")
 
     latitude = longitude = None
-    if house_info and house_info.confidence != "low" and house_info.latitude and house_info.longitude:
+    if house_info and house_info.latitude and house_info.longitude:
         latitude = float(house_info.latitude)
         longitude = float(house_info.longitude)
     result = model.estimate(features, latitude=latitude, longitude=longitude)
-    if house_info and house_info.confidence != "low":
+    if house_info and house_info.source != "not_found":
         result["house_info"] = house_info.to_dict()
     return result

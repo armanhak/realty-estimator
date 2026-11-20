@@ -209,14 +209,19 @@ def format_signed_price(price: float) -> str:
 
 def apply_house(address: str) -> None:
     info = house_service.get_house_info(address, use_poi=False)
-    if info.confidence == "low" or info.source == "not_found":
+    if info.source == "not_found" or not info.latitude or not info.longitude:
         st.session_state.house = None
-        st.session_state.house_message = "Адрес не найден в базе."
+        st.session_state.house_message = "Адрес не найден ни в базе, ни на карте."
         return
 
     st.session_state.address = info.address
     st.session_state.house = info.to_dict()
-    st.session_state.house_message = ""
+    if info.source == "geocoder":
+        st.session_state.house_message = (
+            "Адреса нет в базе. Координаты определены по карте, характеристики квартиры можно ввести вручную."
+        )
+    else:
+        st.session_state.house_message = ""
     if info.year_built:
         st.session_state.year = int(info.year_built)
     if info.floors:
@@ -249,8 +254,8 @@ def load_house() -> None:
 
     matches = house_service.suggest_addresses(typed, limit=7)
     if not matches:
-        st.session_state.house = None
-        st.session_state.house_message = "Адрес не найден в базе."
+        st.session_state.address = typed
+        apply_house(typed)
         return
     if not house_service.local_db.is_unique_match(typed):
         st.session_state.house = None

@@ -227,26 +227,103 @@ class LocalHouseDatabase:
 
 
 class GeocodingService:
+    """Сначала Яндекс, если задан ключ, затем открытые карты."""
+
+    # Чуть шире границ базы, чтобы взять дом рядом с Нижним Новгородом.
+    _SOUTH, _WEST, _NORTH, _EAST = 56.12, 43.50, 56.42, 44.15
+
     def __init__(self, yandex_api_key: Optional[str] = None):
         self.yandex_api_key = yandex_api_key
 
-    def geocode(self, address: str) -> Optional[Tuple[float, float]]:
-        if not self.yandex_api_key:
-            return None
+    def geocode(self, address: str) -> Optional[Tuple[float, float, str]]:
+        query = address.strip()
+        if "новгород" not in query.lower():
+            query = f"{query}, Нижний Новгород"
+        finders = []
+        if self.yandex_api_key:
+            finders.append(self._yandex)
+        finders.extend([self._nominatim, self._photon])
+        for finder in finders:
+            found = finder(query)
+            if found and self._inside(found[0], found[1]):
+                return found
+        return None
+
+    def _inside(self, lat: float, lon: float) -> bool:
+        return self._SOUTH <= lat <= self._NORTH and self._WEST <= lon <= self._EAST
+
+    def _yandex(self, address: str) -> Optional[Tuple[float, float, str]]:
         try:
             import requests
 
             response = requests.get(
                 "https://geocode-maps.yandex.ru/1.x/",
-                params={"apikey": self.yandex_api_key, "geocode": address, "format": "json"},
-                timeout=5,
+                params={"apikey": self.yandex_api_key, "geocode": address, "format": "json", "lang": "ru_RU"},
+                timeout=6,
             )
             response.raise_for_status()
             member = response.json()["response"]["GeoObjectCollection"]["featureMember"][0]
-            lon, lat = map(float, member["GeoObject"]["Point"]["pos"].split())
-            return lat, lon
+            geo = member["GeoObject"]
+            lon, lat = map(float, geo["Point"]["pos"].split())
+            return lat, lon, geo.get("name") or address
         except Exception as exc:
             print(f"[Geocoding] Ошибка Яндекс API: {exc}")
+            return None
+
+    def _nominatim(self, address: str) -> Optional[Tuple[float, float, str]]:
+        try:
+            import requests
+
+            response = requests.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={
+                    "q": address,
+                    "format": "jsonv2",
+                    "limit": 1,
+                    "countrycodes": "ru",
+                    "addressdetails": 1,
+                },
+                headers={"User-Agent": "realty-estimator/1.0 (nizhny apartment valuation)", "Accept-Language": "ru"},
+                timeout=8,
+            )
+            response.raise_for_status()
+            rows = response.json()
+            if not rows:
+                return None
+            row = rows[0]
+            parts = row.get("address") or {}
+            street = parts.get("road") or parts.get("pedestrian") or parts.get("street")
+            house = parts.get("house_number")
+            city = parts.get("city") or parts.get("town") or "Нижний Новгород"
+            label = ", ".join(part for part in [city, street, house] if part) or row.get("display_name") or address
+            return float(row["lat"]), float(row["lon"]), label
+        except Exception as exc:
+            print(f"[Geocoding] Ошибка Nominatim: {exc}")
+            return None
+
+    def _photon(self, address: str) -> Optional[Tuple[float, float, str]]:
+        try:
+            import requests
+
+            response = requests.get(
+                "https://photon.komoot.io/api/",
+                params={"q": address, "limit": 1, "lat": 56.326, "lon": 44.006},
+                headers={"User-Agent": "realty-estimator/1.0 (nizhny apartment valuation)"},
+                timeout=8,
+            )
+            response.raise_for_status()
+            features = response.json().get("features") or []
+            if not features:
+                return None
+            feature = features[0]
+            lon, lat = feature["geometry"]["coordinates"][:2]
+            props = feature.get("properties") or {}
+            name = ", ".join(
+                part for part in [props.get("name"), props.get("street"), props.get("city")] if part
+            )
+            return float(lat), float(lon), name or address
+        except Exception as exc:
+            print(f"[Geocoding] Ошибка Photon: {exc}")
             return None
 
 
@@ -345,7 +422,11 @@ class HouseInfoService:
         if house_info.latitude is None or house_info.longitude is None:
             coords = self.geocoder.geocode(address)
             if coords:
-                house_info.latitude, house_info.longitude = coords
+                house_info.latitude, house_info.longitude = coords[0], coords[1]
+                if house_info.source == "not_found":
+                    house_info.source = "geocoder"
+                    house_info.confidence = "medium"
+                    house_info.address = coords[2] or address
 
         if use_poi and house_info.latitude and house_info.longitude:
             poi_data = self.poi_service.find_nearby(house_info.latitude, house_info.longitude, radius=1500)

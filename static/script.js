@@ -120,7 +120,11 @@ async function fetchHouseInfo() {
             ? `Координаты: ${Number(data.latitude).toFixed(5)}, ${Number(data.longitude).toFixed(5)}`
             : "Координаты не найдены";
         document.getElementById("info-coords").textContent = coords;
-        document.getElementById("info-source").textContent = data.confidence === "high" ? "Найдено в базе" : "Похожий адрес";
+        const sourceLabel = data.source === "geocoder"
+            ? "Координаты с карты"
+            : (data.confidence === "high" ? "Найдено в базе" : "Похожий адрес");
+        document.getElementById("info-source").textContent = sourceLabel;
+        if (data.source === "geocoder" && result.message) showNotification(result.message, "success");
         document.getElementById("house-info-block").classList.remove("hidden");
 
         if (data.year_built) document.getElementById("year").value = data.year_built;
