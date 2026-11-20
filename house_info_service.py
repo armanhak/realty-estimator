@@ -78,40 +78,67 @@ class LocalHouseDatabase:
             addr = addr.replace(src, dst)
         return re.sub(r"\s+", " ", addr).strip(" ,")
 
-    def search_by_address(self, query: str) -> List[pd.Series]:
+    _GENERIC = {
+        "улица", "проспект", "переулок", "бульвар", "шоссе", "площадь",
+        "город", "россия", "нижний", "новгород", "дом", "корпус",
+        "городского", "округа", "жилой", "район",
+    }
+
+    def ranked_addresses(self, query: str, limit: int = 7) -> List[str]:
+        """Адреса домов, которые совпадают с запросом, в том же порядке, что и загрузка дома."""
+        scored = self._score_addresses(query)
+        return [address for _score, address, _key in scored[:limit]]
+
+    def is_unique_match(self, query: str) -> bool:
+        scored = self._score_addresses(query)
+        if len(scored) == 1:
+            return True
+        return len(scored) > 1 and scored[0][0] > scored[1][0]
+
+    def _score_addresses(self, query: str) -> List[Tuple[int, str, str]]:
         query_norm = self._normalize_address(query)
-        if not query_norm:
+        if len(query_norm) < 3:
             return []
-
-        if query_norm in self.address_index:
-            return [self.df.iloc[idx] for idx in self.address_index[query_norm]]
-
-        query_words = {word for word in query_norm.split() if len(word) > 2}
-        scores = []
+        scored = []
         for addr_key, indices in self.address_index.items():
-            if query_norm in addr_key:
-                score = 0.95
-            else:
-                addr_words = set(addr_key.split())
-                common = query_words & addr_words
-                if not common:
-                    continue
-                score = len(common) / max(len(query_words), 1)
-            if score > 0.4:
-                for idx in indices:
-                    scores.append((score, idx))
-
-        scores.sort(key=lambda item: -item[0])
-        seen = set()
-        results = []
-        for _score, idx in scores:
-            if idx in seen:
+            score = self._match_score(query_norm, addr_key)
+            if score <= 0:
                 continue
-            seen.add(idx)
-            results.append(self.df.iloc[idx])
-            if len(results) >= 12:
-                break
-        return results
+            address = str(self.df.iloc[indices[0]]["Адрес"])
+            scored.append((score, address, addr_key))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return scored
+
+    def _match_score(self, query_norm: str, addr_key: str) -> int:
+        query_tokens = [token for token in query_norm.split() if token not in self._GENERIC]
+        if not query_tokens:
+            return 0
+        addr_tokens = addr_key.split()
+        addr_set = set(addr_tokens)
+        score = 0
+        for token in query_tokens:
+            if any(char.isdigit() for char in token):
+                if token not in addr_set:
+                    return 0
+                score += 50
+                continue
+            if token in addr_set:
+                score += 20
+                continue
+            if len(token) >= 3 and any(item.startswith(token) for item in addr_tokens):
+                score += 8
+                continue
+            return 0
+        if query_norm == addr_key:
+            score += 100
+        return score
+
+    def search_by_address(self, query: str) -> List[pd.Series]:
+        scored = self._score_addresses(query)
+        if not scored:
+            return []
+        _score, _address, addr_key = scored[0]
+        return [self.df.iloc[idx] for idx in self.address_index[addr_key]]
 
     def get_house_info(self, query: str) -> Optional[HouseInfo]:
         results = self.search_by_address(query)
@@ -338,34 +365,9 @@ class HouseInfoService:
         return house_info
 
     def suggest_addresses(self, query: str, limit: int = 7) -> List[str]:
-        query_norm = self.local_db._normalize_address(query)
-        if len(query_norm) < 3 or self.local_db.df is None:
+        if self.local_db.df is None:
             return []
-
-        generic = {
-            "улица", "проспект", "переулок", "бульвар", "шоссе", "площадь",
-            "город", "россия", "нижний", "новгород", "дом", "корпус",
-        }
-        words = [
-            word for word in query_norm.split()
-            if word not in generic and (len(word) > 2 or word.isdigit())
-        ]
-        scored = []
-        seen = set()
-        for address in self.local_db.df["Адрес"].dropna().astype(str).unique():
-            if address in seen or address == "—":
-                continue
-            normalized = self.local_db._normalize_address(address)
-            if query_norm in normalized:
-                score = 100 + len(words)
-            else:
-                score = sum(1 for word in words if word in normalized)
-            if score <= 0:
-                continue
-            seen.add(address)
-            scored.append((score, address))
-        scored.sort(key=lambda item: (-item[0], item[1]))
-        return [address for _score, address in scored[:limit]]
+        return self.local_db.ranked_addresses(query, limit=limit)
 
     def _get_from_cache(self, address: str) -> Optional[HouseInfo]:
         if not self.cache_db:

@@ -39,7 +39,6 @@ st.markdown(
         padding: 2rem 2.2rem 2.4rem;
         box-shadow: 0 10px 30px rgba(20, 35, 60, 0.12);
     }
-    h1, h2, h3, p, label, span { color: #243044; }
     .subtitle { color: #5c6b7a; font-size: 16px; margin: 0 0 6px; text-align: center; }
     .method { color: #7b8794; font-size: 14px; text-align: center; margin-bottom: 8px; }
     .page-title { text-align: center; font-size: 28px; margin: 0 0 8px; }
@@ -154,23 +153,16 @@ def format_signed_price(price: float) -> str:
     return sign + " " + f"{int(round(abs(price))):,}".replace(",", " ") + " ₽"
 
 
-def load_house() -> None:
-    typed = (st.session_state.get("address") or "").strip()
-    query = typed
-    if len(query) < 3:
-        st.session_state.house = None
-        st.session_state.house_message = "Введите адрес дома."
-        return
-
-    info = house_service.get_house_info(query, use_poi=False)
+def apply_house(address: str) -> None:
+    info = house_service.get_house_info(address, use_poi=False)
     if info.confidence == "low" or info.source == "not_found":
         st.session_state.house = None
         st.session_state.house_message = "Адрес не найден в базе."
         return
 
+    st.session_state.address = info.address
     st.session_state.house = info.to_dict()
     st.session_state.house_message = ""
-    st.session_state.address = info.address
     if info.year_built:
         st.session_state.year = int(info.year_built)
     if info.floors:
@@ -194,9 +186,28 @@ def load_house() -> None:
         st.session_state.dist_stop = int(info.nearest_bus_stop)
 
 
-def use_suggestion() -> None:
-    st.session_state.address = st.session_state.address_pick
-    load_house()
+def load_house() -> None:
+    typed = (st.session_state.get("address") or "").strip()
+    if len(typed) < 3:
+        st.session_state.house = None
+        st.session_state.house_message = "Введите адрес дома."
+        return
+
+    matches = house_service.suggest_addresses(typed, limit=7)
+    if not matches:
+        st.session_state.house = None
+        st.session_state.house_message = "Адрес не найден в базе."
+        return
+    if not house_service.local_db.is_unique_match(typed):
+        st.session_state.house = None
+        st.session_state.house_message = "Найдено несколько домов. Выберите адрес из подсказки."
+        return
+    apply_house(matches[0])
+
+
+def use_suggestion(address: str) -> None:
+    st.session_state.address = address
+    apply_house(address)
 
 
 def estimate_from_form() -> None:
@@ -242,19 +253,17 @@ with st.form("house_lookup"):
     )
     st.form_submit_button("Загрузить характеристики", on_click=load_house)
 
-suggestions = []
 query = (st.session_state.address or "").strip()
-if len(query) >= 3:
-    suggestions = house_service.suggest_addresses(query, limit=7)
-if suggestions:
-    if st.session_state.get("address_pick") not in suggestions:
-        st.session_state.address_pick = suggestions[0]
-    st.selectbox(
-        "Или выберите адрес из базы",
-        suggestions,
-        key="address_pick",
-        on_change=use_suggestion,
-    )
+suggestions = house_service.suggest_addresses(query, limit=7) if len(query) >= 3 else []
+loaded_address = (st.session_state.house or {}).get("address")
+show_suggestions = [
+    address for address in suggestions
+    if not (loaded_address and address == loaded_address and len(suggestions) == 1)
+]
+if show_suggestions:
+    st.caption("Подсказки из базы. Нажмите адрес, чтобы подставить этот дом.")
+    for index, address in enumerate(show_suggestions):
+        st.button(address, key=f"suggestion_{index}", on_click=use_suggestion, args=(address,))
 
 if st.session_state.house_message:
     st.warning(st.session_state.house_message)
