@@ -122,7 +122,15 @@ st.markdown(
     .price-figure { color: #1f4e79; font-weight: 700; }
     .similarity-badge { display: inline-block; padding: 3px 8px; border-radius: 12px; background: #1f4e79; color: #fff; font-size: 12px; font-weight: 700; }
     .factor-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-    .factor-name { flex: 0 0 220px; font-size: 14px; color: #243044; }
+    .factor-coef { flex: 0 0 72px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .factor-coef.positive { color: #1f7a45; }
+    .factor-coef.negative { color: #b42318; }
+    .factor-name { flex: 0 0 180px; font-size: 14px; color: #243044; }
+    .price-build { background: #f6f8fb; border-radius: 10px; padding: 14px 16px; margin: 8px 0 14px; }
+    .price-build-title { font-weight: 700; margin-bottom: 8px; }
+    .price-build-line, .price-build-total { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 14px; }
+    .price-build-line { border-bottom: 1px solid #e6ebf1; }
+    .price-build-total { font-weight: 700; margin-top: 6px; }
     .factor-bar-container { flex: 1; height: 26px; background: #eef2f6; border-radius: 12px; overflow: hidden; }
     .factor-bar { height: 100%; min-width: 88px; border-radius: 12px; display: flex; align-items: center; padding: 0 10px; color: #fff; font-size: 12px; font-weight: 700; }
     .factor-bar.positive { background: #1f7a45; }
@@ -196,6 +204,20 @@ def format_price(price: float) -> str:
 
 def format_unit_price(price: float) -> str:
     return f"{int(round(price)):,}".replace(",", " ") + " ₽/м²"
+
+
+def format_coef(value: float) -> str:
+    sign = "+" if value >= 0 else "−"
+    return sign + f"{abs(value):.3f}".replace(".", ",")
+
+
+def format_factor(value: float) -> str:
+    return f"{value:.4f}".replace(".", ",")
+
+
+def format_area(area: float) -> str:
+    text = f"{area:g}"
+    return text.replace(".", ",")
 
 
 def format_distance(meters) -> str:
@@ -412,14 +434,37 @@ if result:
     total_adj = result["price"] - result["base_price"]
     total_pct = (total_adj / result["base_price"] * 100) if result["base_price"] else 0
     total_dir = "positive" if total_adj >= 0 else "negative"
+    area_text = format_area(result["area"])
+    build_lines = [
+        "<div class='price-build-line'><span>Базовая удельная цена</span>"
+        f"<span>{format_unit_price(result['base_unit_price'])}</span></div>"
+    ]
+    for item in result["adjustments"]:
+        direction = "positive" if item["coef"] >= 0 else "negative"
+        build_lines.append(
+            "<div class='price-build-line'>"
+            f"<span>{html.escape(str(item['label']))}, β <span class='factor-coef {direction}'>{format_coef(item['coef'])}</span></span>"
+            f"<span>× {format_factor(item['multiplier'])} · {format_signed_price(item['unit_adj']).replace(' ₽', ' ₽/м²')}</span>"
+            "</div>"
+        )
+    build_lines.append(
+        "<div class='price-build-total'><span>Удельная цена</span>"
+        f"<span>{format_unit_price(result['unit_price'])}</span></div>"
+    )
+    build_lines.append(
+        "<div class='price-build-total'><span>Итоговая цена</span>"
+        f"<span>{format_unit_price(result['unit_price'])} × {area_text} м² = {format_price(result['price'])}</span></div>"
+    )
     adjustment_rows = []
     for index, item in enumerate(result["adjustments"], start=1):
         direction = "positive" if item["money_adj"] >= 0 else "negative"
         adjustment_rows.append(
             "<tr>"
             f"<td>{index}</td>"
+            f"<td class='money-cell {direction}'>{format_coef(item['coef'])}</td>"
             f"<td>{html.escape(str(item['label']))}</td>"
             f"<td>{html.escape(str(item['object_value']))}</td>"
+            f"<td class='money-cell {direction}'>{format_signed_price(item['unit_adj']).replace(' ₽', ' ₽/м²')}</td>"
             f"<td class='money-cell {direction}'>{format_signed_price(item['money_adj'])}</td>"
             f"<td class='pct-cell {direction}'>{item['pct_adj']:+.1f}%</td>"
             f"<td><span class='direction-badge {direction}'>"
@@ -428,37 +473,41 @@ if result:
         )
     adjustment_rows.append(
         "<tr class='total-row'>"
-        "<td colspan='3' style='text-align:right'>Итог относительно базовой стоимости</td>"
+        "<td colspan='5' style='text-align:right'>Итог относительно базовой стоимости</td>"
         f"<td class='money-cell {total_dir}'>{format_signed_price(total_adj)}</td>"
         f"<td class='pct-cell {total_dir}'>{total_pct:+.1f}%</td>"
         "<td></td></tr>"
     )
-    max_impact = max((abs(item["money_adj"]) for item in result["adjustments"][:8]), default=1) or 1
+    max_impact = max((abs(item["money_adj"]) for item in result["adjustments"]), default=1) or 1
     bars = []
-    for item in result["adjustments"][:8]:
+    for item in result["adjustments"]:
         direction = "positive" if item["money_adj"] >= 0 else "negative"
         width = max(8, abs(item["money_adj"]) / max_impact * 100)
         bars.append(
             "<div class='factor-row'>"
+            f"<div class='factor-coef {direction}'>{format_coef(item['coef'])}</div>"
             f"<div class='factor-name'>{html.escape(str(item['label']))}</div>"
             "<div class='factor-bar-container'>"
             f"<div class='factor-bar {direction}' style='width:{width:.0f}%'>"
             f"{format_signed_price(item['money_adj'])}</div></div></div>"
         )
+    st.markdown("**Как сложилась цена**")
+    st.markdown("<div class='price-build'>" + "".join(build_lines) + "</div>", unsafe_allow_html=True)
     st.markdown("**Поправки к рыночной стоимости**")
     st.markdown(
         "<table class='adjustments-table'><thead><tr>"
-        "<th>№</th><th>Параметр</th><th>У объекта</th>"
-        "<th>Поправка, ₽</th><th>Поправка, %</th><th>Влияние</th>"
+        "<th>№</th><th>β</th><th>Параметр</th><th>У объекта</th>"
+        "<th>Удельная, ₽/м²</th><th>Поправка, ₽</th><th>Поправка, %</th><th>Влияние</th>"
         "</tr></thead><tbody>"
         + "".join(adjustment_rows)
         + "</tbody></table>"
-        "<div class='table-footnote'>Поправки посчитаны для удельной цены и умножены на площадь квартиры. "
-        "Они не складываются в одну сумму: параметры влияют на цену совместно. "
-        "Итоговая строка — разница между оценкой и базовой стоимостью.</div>"
-        + "".join(bars),
+        "<div class='table-footnote'>Здесь все 14 признаков. Удельная поправка — вклад в цену квадратного метра, "
+        "рублёвая — тот же вклад, умноженный на площадь. Строки перемножаются, а не складываются. "
+        "Итоговая строка — разница между оценкой и базовой стоимостью.</div>",
         unsafe_allow_html=True,
     )
+    st.markdown("**Все признаки: коэффициент и влияние в рублях**")
+    st.markdown("".join(bars), unsafe_allow_html=True)
 
     distance_note = (
         "Рядом с домом объекты получают больший вес. На расстоянии 1,5 км этот вес близости составляет около 60%."
@@ -478,6 +527,7 @@ if result:
             f"<td>{html.escape(str(item['year']))}</td>"
             f"<td>{html.escape(str(item['repair']))}</td>"
             f"<td>{format_distance(item.get('distance_m'))}</td>"
+            f"<td class='price-figure'>{format_unit_price(item['unit_price'])}</td>"
             f"<td class='price-figure'>{format_price(item['price'])}</td>"
             f"<td><span class='similarity-badge'>{item['similarity']}%</span></td>"
             "</tr>"
@@ -485,7 +535,7 @@ if result:
     st.markdown(
         "<table class='analogues-table'><thead><tr>"
         "<th>Адрес</th><th>Площадь, м²</th><th>Комнаты</th><th>Этаж</th>"
-        "<th>Материал</th><th>Год</th><th>Ремонт</th><th>До объекта</th><th>Цена</th><th>Сходство</th>"
+        "<th>Материал</th><th>Год</th><th>Ремонт</th><th>До объекта</th><th>Удельная</th><th>Цена</th><th>Сходство</th>"
         "</tr></thead><tbody>"
         + "".join(analogue_rows)
         + "</tbody></table>",

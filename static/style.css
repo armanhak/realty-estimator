@@ -259,7 +259,15 @@ th { background: #f6f8fb; font-weight: 600; }
 }
 
 .factor-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.factor-name { flex: 0 0 220px; font-size: 14px; }
+.factor-coef { flex: 0 0 72px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.factor-coef.positive { color: #1f7a45; }
+.factor-coef.negative { color: #b42318; }
+.factor-name { flex: 0 0 180px; font-size: 14px; }
+.price-build { background: #f6f8fb; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+.price-build-title { font-weight: 700; margin-bottom: 8px; }
+.price-build-line, .price-build-total { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 14px; }
+.price-build-line { border-bottom: 1px solid #e6ebf1; }
+.price-build-total { font-weight: 700; margin-top: 6px; }
 .factor-bar-container { flex: 1; height: 26px; background: #eef2f6; border-radius: 12px; overflow: hidden; }
 .factor-bar {
     height: 100%;
@@ -325,7 +333,8 @@ footer p { margin-bottom: 4px; }
 @media (max-width: 768px) {
     .result-main, .address-input-wrapper, .adjustments-summary, .house-info-header { display: block; }
     .summary-item, .btn-fetch { width: 100%; margin-top: 10px; }
-    .factor-name { flex-basis: 120px; font-size: 12px; }
+    .factor-coef { flex-basis: 58px; font-size: 12px; }
+    .factor-name { flex-basis: 110px; font-size: 12px; }
     header h1 { font-size: 22px; }
     .price-value, .stat-value { font-size: 28px; }
 }

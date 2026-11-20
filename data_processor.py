@@ -181,6 +181,8 @@ class DataProcessor:
         analogues = []
         for idx, weight in pairs:
             row = self.df.iloc[int(idx)]
+            area = float(row["Общая площадь, кв.м"])
+            price = int(row["Цена"])
             raw_id = row.get("id", int(idx))
             try:
                 raw_id = int(raw_id)
@@ -196,7 +198,8 @@ class DataProcessor:
                     "material": row.get("Материал (текст)", "—"),
                     "year": int(row["Год постройки"]),
                     "repair": row.get("Ремонт (текст)", "—"),
-                    "price": int(row["Цена"]),
+                    "price": price,
+                    "unit_price": int(round(price / area)) if area else None,
                     "weight": float(weight),
                     "similarity": min(100, int(float(weight) * 100 / max(0.001, max_weight))),
                     "distance_m": (

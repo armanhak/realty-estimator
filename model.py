@@ -129,15 +129,18 @@ class ValuationModel:
         adjustments = []
         for i, name in enumerate(feature_cols):
             log_contribution = float(model.coef_[i] * x_scaled[0, i])
-            money_adjustment = base_price * np.exp(log_contribution) - base_price
-            pct_adjustment = (np.exp(log_contribution) - 1) * 100
+            multiplier = float(np.exp(log_contribution))
+            unit_adjustment = base_price * multiplier - base_price
+            pct_adjustment = (multiplier - 1) * 100
             adjustments.append(
                 {
                     "feature": name,
                     "label": FEATURE_LABELS.get(name, name),
                     "coef": float(model.coef_[i]),
                     "scaled_value": float(x_scaled[0, i]),
-                    "money_adj": float(money_adjustment),
+                    "multiplier": multiplier,
+                    "unit_adj": float(unit_adjustment),
+                    "money_adj": float(unit_adjustment),
                     "pct_adj": float(pct_adjustment),
                 }
             )
@@ -247,6 +250,8 @@ class ValuationModel:
         return {
             "price": int(round(y_pred)),
             "unit_price": unit_price_rounded,
+            "base_unit_price": int(round(base_unit)),
+            "area": area,
             "base_price": int(round(base_price)),
             "ci_low": int(round(ci_low)),
             "ci_high": int(round(ci_high)),

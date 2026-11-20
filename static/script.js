@@ -17,6 +17,23 @@ function formatSignedPrice(price) {
     return sign + " " + Math.abs(Math.round(price)).toLocaleString("ru-RU") + " ₽";
 }
 
+function formatSignedUnitPrice(price) {
+    return formatSignedPrice(price).replace(" ₽", " ₽/м²");
+}
+
+function formatCoef(value) {
+    const sign = value >= 0 ? "+" : "−";
+    return sign + Math.abs(value).toFixed(3).replace(".", ",");
+}
+
+function formatFactor(value) {
+    return Number(value).toFixed(4).replace(".", ",");
+}
+
+function formatArea(area) {
+    return String(area).replace(".", ",");
+}
+
 function formatPct(pct) {
     const sign = pct >= 0 ? "+" : "−";
     return sign + Math.abs(pct).toFixed(1) + "%";
@@ -228,12 +245,31 @@ function renderAdjustmentsTable(result) {
     const totalAdj = finalPrice - basePrice;
     const totalDir = totalAdj >= 0 ? "positive" : "negative";
 
+    const buildLines = [
+        `<div class="price-build-line"><span>Базовая удельная цена</span><span>${formatUnitPrice(result.base_unit_price)}</span></div>`,
+    ];
+    adjustments.forEach((item) => {
+        const direction = item.coef >= 0 ? "positive" : "negative";
+        buildLines.push(
+            `<div class="price-build-line"><span>${item.label}, β <span class="factor-coef ${direction}">${formatCoef(item.coef)}</span></span>`
+            + `<span>× ${formatFactor(item.multiplier)} · ${formatSignedUnitPrice(item.unit_adj)}</span></div>`
+        );
+    });
+    buildLines.push(`<div class="price-build-total"><span>Удельная цена</span><span>${formatUnitPrice(result.unit_price)}</span></div>`);
+    buildLines.push(
+        `<div class="price-build-total"><span>Итоговая цена</span><span>${formatUnitPrice(result.unit_price)} × ${formatArea(result.area)} м² = ${formatPrice(finalPrice)}</span></div>`
+    );
+
     let html = `
+        <div class="price-build">
+            <div class="price-build-title">Как сложилась цена</div>
+            ${buildLines.join("")}
+        </div>
         <div class="adjustments-summary">
             <div class="summary-item">
                 <div class="summary-label">Базовая стоимость</div>
                 <div class="summary-value">${formatPrice(basePrice)}</div>
-                <div class="summary-hint">при средних характеристиках</div>
+                <div class="summary-hint">удельная цена × площадь</div>
             </div>
             <div class="summary-arrow">→</div>
             <div class="summary-item final">
@@ -246,8 +282,10 @@ function renderAdjustmentsTable(result) {
             <thead>
                 <tr>
                     <th>№</th>
+                    <th>β</th>
                     <th>Параметр</th>
                     <th>У объекта</th>
+                    <th>Удельная, ₽/м²</th>
                     <th>Поправка, ₽</th>
                     <th>Поправка, %</th>
                     <th>Влияние</th>
@@ -261,8 +299,10 @@ function renderAdjustmentsTable(result) {
         html += `
             <tr>
                 <td>${index + 1}</td>
+                <td class="money-cell ${direction}">${formatCoef(item.coef)}</td>
                 <td>${item.label}</td>
                 <td>${item.object_value}</td>
+                <td class="money-cell ${direction}">${formatSignedUnitPrice(item.unit_adj)}</td>
                 <td class="money-cell ${direction}">${formatSignedPrice(item.money_adj)}</td>
                 <td class="pct-cell ${direction}">${formatPct(item.pct_adj)}</td>
                 <td><span class="direction-badge ${direction}">${text}</span></td>
@@ -271,29 +311,30 @@ function renderAdjustmentsTable(result) {
 
     html += `
             <tr class="total-row">
-                <td colspan="3" class="total-label">Итог относительно базовой стоимости</td>
+                <td colspan="5" class="total-label">Итог относительно базовой стоимости</td>
                 <td class="money-cell ${totalDir}">${formatSignedPrice(totalAdj)}</td>
                 <td class="pct-cell ${totalDir}">${formatPct((totalAdj / basePrice) * 100)}</td>
                 <td></td>
             </tr>
         </tbody></table>
         <div class="table-footnote">
-            Поправки показаны по отдельности относительно средней квартиры. Они не складываются
-            в одну сумму: параметры влияют на цену совместно. Итоговая строка — разница между
-            оценкой и базовой стоимостью.
+            Здесь все 14 признаков. Удельная поправка — вклад в цену квадратного метра,
+            рублёвая — тот же вклад, умноженный на площадь. Строки перемножаются, а не складываются.
+            Итоговая строка — разница между оценкой и базовой стоимостью.
         </div>`;
     container.innerHTML = html;
 }
 
 function renderWaterfallChart(result) {
     const chart = document.getElementById("factors-chart");
-    const adjustments = (result.adjustments || []).slice(0, 8);
+    const adjustments = result.adjustments || [];
     const maxImpact = Math.max(...adjustments.map((item) => Math.abs(item.money_adj)), 1);
     chart.innerHTML = adjustments.map((item) => {
         const width = Math.max(8, (Math.abs(item.money_adj) / maxImpact) * 100);
         const direction = item.money_adj >= 0 ? "positive" : "negative";
         return `
             <div class="factor-row">
+                <div class="factor-coef ${direction}">${formatCoef(item.coef)}</div>
                 <div class="factor-name">${item.label}</div>
                 <div class="factor-bar-container">
                     <div class="factor-bar ${direction}" style="width: ${width}%">${formatSignedPrice(item.money_adj)}</div>
@@ -313,6 +354,7 @@ function renderAnaloguesTable(result) {
             <td>${item.year}</td>
             <td>${item.repair}</td>
             <td>${formatDistance(item.distance_m)}</td>
+            <td><strong>${formatUnitPrice(item.unit_price)}</strong></td>
             <td><strong>${formatPrice(item.price)}</strong></td>
             <td><span class="similarity-badge">${item.similarity}%</span></td>
         </tr>`).join("");
@@ -321,7 +363,7 @@ function renderAnaloguesTable(result) {
             <thead>
                 <tr>
                     <th>Адрес</th><th>Площадь</th><th>Комнаты</th><th>Этаж</th>
-                    <th>Материал</th><th>Год</th><th>Ремонт</th><th>До объекта</th><th>Цена</th><th>Сходство</th>
+                    <th>Материал</th><th>Год</th><th>Ремонт</th><th>До объекта</th><th>Удельная</th><th>Цена</th><th>Сходство</th>
                 </tr>
             </thead>
             <tbody>${rows}</tbody>
