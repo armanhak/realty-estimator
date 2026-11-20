@@ -251,7 +251,7 @@ function renderAdjustmentsTable(result) {
     adjustments.forEach((item) => {
         const direction = item.coef >= 0 ? "positive" : "negative";
         buildLines.push(
-            `<div class="price-build-line"><span>${item.label}, β <span class="factor-coef ${direction}">${formatCoef(item.coef)}</span></span>`
+            `<div class="price-build-line"><span>${item.label} <span class="factor-coef ${direction}">β ${formatCoef(item.coef)}</span></span>`
             + `<span>× ${formatFactor(item.multiplier)} · ${formatSignedUnitPrice(item.unit_adj)}</span></div>`
         );
     });
@@ -282,8 +282,8 @@ function renderAdjustmentsTable(result) {
             <thead>
                 <tr>
                     <th>№</th>
-                    <th>β</th>
                     <th>Параметр</th>
+                    <th>β</th>
                     <th>У объекта</th>
                     <th>Удельная, ₽/м²</th>
                     <th>Поправка, ₽</th>
@@ -299,8 +299,8 @@ function renderAdjustmentsTable(result) {
         html += `
             <tr>
                 <td>${index + 1}</td>
-                <td class="money-cell ${direction}">${formatCoef(item.coef)}</td>
                 <td>${item.label}</td>
+                <td class="money-cell ${direction}">${formatCoef(item.coef)}</td>
                 <td>${item.object_value}</td>
                 <td class="money-cell ${direction}">${formatSignedUnitPrice(item.unit_adj)}</td>
                 <td class="money-cell ${direction}">${formatSignedPrice(item.money_adj)}</td>
@@ -334,8 +334,8 @@ function renderWaterfallChart(result) {
         const direction = item.money_adj >= 0 ? "positive" : "negative";
         return `
             <div class="factor-row">
-                <div class="factor-coef ${direction}">${formatCoef(item.coef)}</div>
                 <div class="factor-name">${item.label}</div>
+                <div class="factor-coef ${direction}">${formatCoef(item.coef)}</div>
                 <div class="factor-bar-container">
                     <div class="factor-bar ${direction}" style="width: ${width}%">${formatSignedPrice(item.money_adj)}</div>
                 </div>
@@ -358,7 +358,9 @@ function renderAnaloguesTable(result) {
             <td><strong>${formatPrice(item.price)}</strong></td>
             <td><span class="similarity-badge">${item.similarity}%</span></td>
         </tr>`).join("");
+    const used = result.n_analogues_used || 0;
     document.getElementById("analogues-table").innerHTML = `
+        <p class="section-description">В цену входят все квартиры с весом не ниже 0,05. Если таких меньше 40, берутся 40 самых весомых: сейчас в расчёте ${used}. Коэффициенты и цена считаются по всей этой выборке. В таблице только 5 квартир с наибольшим весом — ближайшие ориентиры. Отдельно в формулу они не подставляются, их цены уже учтены в общем расчёте. Сходство — вес относительно самого весомого из этих пяти.</p>
         <table>
             <thead>
                 <tr>

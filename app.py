@@ -443,7 +443,7 @@ if result:
         direction = "positive" if item["coef"] >= 0 else "negative"
         build_lines.append(
             "<div class='price-build-line'>"
-            f"<span>{html.escape(str(item['label']))}, β <span class='factor-coef {direction}'>{format_coef(item['coef'])}</span></span>"
+            f"<span>{html.escape(str(item['label']))} <span class='factor-coef {direction}'>β {format_coef(item['coef'])}</span></span>"
             f"<span>× {format_factor(item['multiplier'])} · {format_signed_price(item['unit_adj']).replace(' ₽', ' ₽/м²')}</span>"
             "</div>"
         )
@@ -461,8 +461,8 @@ if result:
         adjustment_rows.append(
             "<tr>"
             f"<td>{index}</td>"
-            f"<td class='money-cell {direction}'>{format_coef(item['coef'])}</td>"
             f"<td>{html.escape(str(item['label']))}</td>"
+            f"<td class='money-cell {direction}'>{format_coef(item['coef'])}</td>"
             f"<td>{html.escape(str(item['object_value']))}</td>"
             f"<td class='money-cell {direction}'>{format_signed_price(item['unit_adj']).replace(' ₽', ' ₽/м²')}</td>"
             f"<td class='money-cell {direction}'>{format_signed_price(item['money_adj'])}</td>"
@@ -485,8 +485,8 @@ if result:
         width = max(8, abs(item["money_adj"]) / max_impact * 100)
         bars.append(
             "<div class='factor-row'>"
-            f"<div class='factor-coef {direction}'>{format_coef(item['coef'])}</div>"
             f"<div class='factor-name'>{html.escape(str(item['label']))}</div>"
+            f"<div class='factor-coef {direction}'>{format_coef(item['coef'])}</div>"
             "<div class='factor-bar-container'>"
             f"<div class='factor-bar {direction}' style='width:{width:.0f}%'>"
             f"{format_signed_price(item['money_adj'])}</div></div></div>"
@@ -496,7 +496,7 @@ if result:
     st.markdown("**Поправки к рыночной стоимости**")
     st.markdown(
         "<table class='adjustments-table'><thead><tr>"
-        "<th>№</th><th>β</th><th>Параметр</th><th>У объекта</th>"
+        "<th>№</th><th>Параметр</th><th>β</th><th>У объекта</th>"
         "<th>Удельная, ₽/м²</th><th>Поправка, ₽</th><th>Поправка, %</th><th>Влияние</th>"
         "</tr></thead><tbody>"
         + "".join(adjustment_rows)
@@ -514,7 +514,14 @@ if result:
         if result.get("latitude")
         else "Адрес с координатами не выбран, поэтому расстояние по карте в весе не участвует."
     )
-    st.markdown(f"**Ближайшие аналоги из базы**\n\n{distance_note}")
+    st.markdown("**Ближайшие аналоги из базы**")
+    st.markdown(
+        f"В цену входят все квартиры с весом не ниже 0,05. Если таких меньше 40, берутся 40 самых весомых: "
+        f"сейчас в расчёте {result['n_analogues_used']}. Коэффициенты и цена считаются по всей этой выборке. "
+        "В таблице только 5 квартир с наибольшим весом — ближайшие ориентиры. Отдельно в формулу они не подставляются, "
+        "их цены уже учтены в общем расчёте. Сходство — вес относительно самого весомого из этих пяти. "
+        + distance_note
+    )
     analogue_rows = []
     for item in result["analogues"]:
         analogue_rows.append(
@@ -570,8 +577,10 @@ d_i = \sqrt{(z_1 - z_{i1})^2 + (z_2 - z_{i2})^2 + \cdots + (z_{14} - z_{i14})^2}
 $$
 
 $$
-w^{\text{хар}}_i = \exp\left(-\frac{d_i^2}{4{,}5}\right)
+w^{\text{хар}}_i = \exp\left(-\frac{d_i^2}{2 \cdot 1{,}5^2}\right) = \exp\left(-\frac{d_i^2}{4{,}5}\right)
 $$
+
+4,5 — это $2 \times 1{,}5^2$. Число 1,5 — ширина ядра в масштабе признаков: одна единица там равна одному стандартному отклонению базы. При различии ровно на 1,5 вес характеристик около 61%. Если квартиры различаются сильнее, вес быстро падает, и далёкие по параметрам объекты почти не влияют.
 
 3. **Вес по карте.** Если у адреса есть координаты, вес умножается на близость. $m_i$ — расстояние до объекта в метрах:
 
@@ -579,7 +588,7 @@ $$
 w^{\text{карта}}_i = \exp\left(-\frac{m_i^2}{2 \cdot 1500^2}\right), \qquad w_i = w^{\text{хар}}_i \cdot w^{\text{карта}}_i
 $$
 
-На расстоянии 1,5 км географический множитель примерно 0,61. Квартиры с весом ниже 0,05 отбрасываются. Если после этого остаётся меньше 40, берутся 40 с наибольшим весом.
+1500 — ширина ядра в метрах, а не весь знаменатель. Знаменатель равен $2 \times 1500^2$. На расстоянии 1500 м вес близости около 61%, на 3 км — около 14%. Ближний дом остаётся важным, дальний почти выпадает. Квартиры с итоговым весом ниже 0,05 отбрасываются. Если после этого остаётся меньше 40, берутся 40 с наибольшим весом. По всей этой выборке считаются коэффициенты и цена.
 
 4. **Формула по отобранным квартирам.** Для аналога $i$ берутся его цена $P_i$ и площадь $S_i$. Ищутся $\alpha$ и коэффициенты $\beta_1, \ldots, \beta_{14}$, которые лучше всего объясняют удельные цены:
 
@@ -601,7 +610,7 @@ $$
 \text{Поправка}_k = S \cdot e^{\alpha}\left(e^{\beta_k z_k} - 1\right)
 $$
 
-Признаки входят в удельную цену произведением, поэтому сумма строк не равна итоговой цене. Сходство в таблице аналогов — вес квартиры относительно самого весомого из пяти показанных объектов.
+Признаки входят в удельную цену произведением, поэтому сумма строк не равна итоговой цене. Сходство в таблице пяти аналогов — вес квартиры относительно самого весомого из этих пяти. Пять строк — не отдельная выборка для цены. Это квартиры с наибольшим весом из тех, что уже вошли в расчёт, чтобы было видно ближайшие ориентиры.
 
 Оценка нужна для ориентира. Итоговое суждение остаётся за специалистом.
 """
